@@ -7,20 +7,43 @@ import com.laundrypro.mymaidmanager.models.RegisterRequest
 import com.laundrypro.mymaidmanager.network.RetrofitClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 sealed class AuthResult {
     object Idle : AuthResult()
     object Loading : AuthResult()
-    object Success : AuthResult()
     data class Error(val message: String) : AuthResult()
 }
 
+// Represents whether the user is logged in or out
+sealed class AuthState {
+    object Authenticated : AuthState()
+    object Unauthenticated : AuthState()
+    object Unknown : AuthState()
+}
+
+
 class AuthViewModel : ViewModel() {
     private val _authResult = MutableStateFlow<AuthResult>(AuthResult.Idle)
-    val authResult: StateFlow<AuthResult> = _authResult
+    val authResult: StateFlow<AuthResult> = _authResult.asStateFlow()
+
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Unknown)
+    val authState: StateFlow<AuthState> = _authState.asStateFlow()
+
 
     private val apiService = RetrofitClient.apiService
+
+    // Companion object to hold the token statically, accessible from RetrofitClient
+    companion object {
+        var token: String? = null
+            private set
+    }
+
+    init {
+        // In a real app, you would check SharedPreferences for a saved token here
+        _authState.value = AuthState.Unauthenticated
+    }
 
     fun registerUser(name: String, email: String, password: String) {
         viewModelScope.launch {
@@ -28,8 +51,9 @@ class AuthViewModel : ViewModel() {
             try {
                 val response = apiService.registerUser(RegisterRequest(name, email, password))
                 if (response.isSuccessful && response.body()?.token != null) {
-                    _authResult.value = AuthResult.Success
-                    // TODO: Save the token
+                    // Save the token and update the auth state to Authenticated
+                    token = response.body()?.token
+                    _authState.value = AuthState.Authenticated
                 } else {
                     val errorMsg = response.errorBody()?.string() ?: "Registration failed"
                     _authResult.value = AuthResult.Error(errorMsg)
@@ -46,8 +70,8 @@ class AuthViewModel : ViewModel() {
             try {
                 val response = apiService.loginUser(LoginRequest(email, password))
                 if (response.isSuccessful && response.body()?.token != null) {
-                    _authResult.value = AuthResult.Success
-                    // TODO: Save the token
+                    token = response.body()?.token
+                    _authState.value = AuthState.Authenticated
                 } else {
                     val errorMsg = response.errorBody()?.string() ?: "Invalid credentials"
                     _authResult.value = AuthResult.Error(errorMsg)
@@ -58,7 +82,13 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun resetAuthState() {
+    fun logout() {
+        token = null
+        _authState.value = AuthState.Unauthenticated
+    }
+
+    fun resetAuthResult() {
         _authResult.value = AuthResult.Idle
     }
 }
+

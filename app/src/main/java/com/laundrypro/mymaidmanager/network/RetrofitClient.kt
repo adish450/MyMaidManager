@@ -1,5 +1,6 @@
 package com.laundrypro.mymaidmanager.network
 
+import com.laundrypro.mymaidmanager.viewmodel.AuthViewModel
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -7,14 +8,24 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
 
-    // IMPORTANT: Replace with your EC2 instance's Public IPv4 address
     private const val BASE_URL = "http://16.16.149.149:5000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
+    // Interceptor to add the auth token to headers
+    private val authInterceptor = okhttp3.Interceptor { chain ->
+        val requestBuilder = chain.request().newBuilder()
+        // If a token exists, add it to the request
+        AuthViewModel.token?.let {
+            requestBuilder.addHeader("x-auth-token", it)
+        }
+        chain.proceed(requestBuilder.build())
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(authInterceptor)
         .addInterceptor(loggingInterceptor)
         .build()
 
