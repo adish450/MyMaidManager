@@ -60,7 +60,9 @@ sealed class Screen(val route: String) {
 }
 
 class MainActivity : ComponentActivity() {
-    private val authViewModel: AuthViewModel by viewModels()
+    private val authViewModel: AuthViewModel by viewModels {
+        AuthViewModelFactory(application)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +77,21 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel) {
-    NavHost(navController = navController, startDestination = Screen.Auth.route) {
+    val authState by authViewModel.authState.collectAsStateWithLifecycle()
+
+    // Determine the start destination based on the initial auth state
+    val startDestination = when (authState) {
+        is AuthState.Authenticated -> Screen.MainList.route
+        is AuthState.Unauthenticated -> Screen.Auth.route
+        is AuthState.Unknown -> "loading_screen" // A temporary route for the initial unknown state
+    }
+
+    NavHost(navController = navController, startDestination = startDestination) {
+        composable("loading_screen") {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
         composable(Screen.Auth.route) {
             AuthScreen(authViewModel, onLoginSuccess = {
                 navController.navigate(Screen.MainList.route) {
@@ -85,29 +101,22 @@ fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel)
         }
         composable(Screen.MainList.route) {
             MainListScreen(
-                onLogout = {
-                    authViewModel.logout()
-                },
+                onLogout = { authViewModel.logout() },
                 onMaidClicked = { maidId ->
                     navController.navigate(Screen.MaidDetail.createRoute(maidId))
                 }
             )
         }
         composable(Screen.MaidDetail.route) { backStackEntry ->
-            // THE FIX IS HERE: Add a null check before calling the screen
             val maidId = backStackEntry.arguments?.getString("maidId")
             if (maidId != null) {
                 MaidDetailScreen(maidId = maidId, onNavigateUp = { navController.navigateUp() })
-            } else {
-                // Optional: Handle the error case, e.g., navigate back or show an error
-                // For now, we do nothing, which prevents the crash.
             }
         }
     }
 
-    val authState by authViewModel.authState.collectAsStateWithLifecycle()
     LaunchedEffect(authState) {
-        if (authState is AuthState.Unauthenticated) {
+        if (authState is AuthState.Unauthenticated && navController.currentDestination?.route != Screen.Auth.route) {
             navController.navigate(Screen.Auth.route) { popUpTo(0) }
         }
     }
@@ -417,8 +426,8 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     }
 
     val authState by viewModel.authState.collectAsStateWithLifecycle()
-    LaunchedEffect(authState){
-        if(authState is AuthState.Authenticated){
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Authenticated) {
             onLoginSuccess()
         }
     }

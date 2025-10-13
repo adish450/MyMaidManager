@@ -1,7 +1,10 @@
 package com.laundrypro.mymaidmanager.viewmodel
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.laundrypro.mymaidmanager.data.SessionManager
 import com.laundrypro.mymaidmanager.models.LoginRequest
 import com.laundrypro.mymaidmanager.models.RegisterRequest
 import com.laundrypro.mymaidmanager.network.RetrofitClient
@@ -16,33 +19,37 @@ sealed class AuthResult {
     data class Error(val message: String) : AuthResult()
 }
 
-// Represents whether the user is logged in or out
 sealed class AuthState {
     object Authenticated : AuthState()
     object Unauthenticated : AuthState()
     object Unknown : AuthState()
 }
 
-
-class AuthViewModel : ViewModel() {
+class AuthViewModel(application: Application) : ViewModel() {
     private val _authResult = MutableStateFlow<AuthResult>(AuthResult.Idle)
     val authResult: StateFlow<AuthResult> = _authResult.asStateFlow()
 
     private val _authState = MutableStateFlow<AuthState>(AuthState.Unknown)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-
+    private val sessionManager = SessionManager(application)
     private val apiService = RetrofitClient.apiService
 
-    // Companion object to hold the token statically, accessible from RetrofitClient
     companion object {
         var token: String? = null
             private set
     }
 
     init {
-        // In a real app, you would check SharedPreferences for a saved token here
-        _authState.value = AuthState.Unauthenticated
+        viewModelScope.launch {
+            val savedToken = sessionManager.fetchAuthToken()
+            if (savedToken != null) {
+                token = savedToken
+                _authState.value = AuthState.Authenticated
+            } else {
+                _authState.value = AuthState.Unauthenticated
+            }
+        }
     }
 
     fun registerUser(name: String, email: String, password: String) {
@@ -51,8 +58,9 @@ class AuthViewModel : ViewModel() {
             try {
                 val response = apiService.registerUser(RegisterRequest(name, email, password))
                 if (response.isSuccessful && response.body()?.token != null) {
-                    // Save the token and update the auth state to Authenticated
-                    token = response.body()?.token
+                    val newToken = response.body()!!.token!!
+                    token = newToken
+                    sessionManager.saveAuthToken(newToken)
                     _authState.value = AuthState.Authenticated
                 } else {
                     val errorMsg = response.errorBody()?.string() ?: "Registration failed"
@@ -70,7 +78,9 @@ class AuthViewModel : ViewModel() {
             try {
                 val response = apiService.loginUser(LoginRequest(email, password))
                 if (response.isSuccessful && response.body()?.token != null) {
-                    token = response.body()?.token
+                    val newToken = response.body()!!.token!!
+                    token = newToken
+                    sessionManager.saveAuthToken(newToken)
                     _authState.value = AuthState.Authenticated
                 } else {
                     val errorMsg = response.errorBody()?.string() ?: "Invalid credentials"
@@ -84,6 +94,7 @@ class AuthViewModel : ViewModel() {
 
     fun logout() {
         token = null
+        sessionManager.clearAuthToken()
         _authState.value = AuthState.Unauthenticated
     }
 
@@ -92,3 +103,12 @@ class AuthViewModel : ViewModel() {
     }
 }
 
+class AuthViewModelFactory(private val application: Application) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(AuthViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return AuthViewModel(application) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
