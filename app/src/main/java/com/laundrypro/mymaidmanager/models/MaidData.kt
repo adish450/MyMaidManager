@@ -6,6 +6,7 @@ data class Maid(
     @SerializedName("_id") // Maps the JSON "_id" field to our "id" variable
     val id: String,
     val name: String,
+    @SerializedName("mobileNo")
     val mobile: String,
     val address: String,
     val user: String,
@@ -31,6 +32,7 @@ data class AttendanceRecord(
 
 data class AddMaidRequest(
     val name: String,
+    @SerializedName("mobileNo")
     val mobile: String,
     val address: String
 )
