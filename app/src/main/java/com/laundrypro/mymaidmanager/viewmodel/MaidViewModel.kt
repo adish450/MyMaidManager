@@ -28,6 +28,13 @@ sealed class OtpState {
     data class Error(val message: String) : OtpState()
 }
 
+// New state for Payroll UI
+sealed class PayrollUIState {
+    data object Loading : PayrollUIState()
+    data class Success(val payroll: PayrollResponse) : PayrollUIState()
+    data class Error(val message: String) : PayrollUIState()
+}
+
 class MaidViewModel : ViewModel() {
     private val _maidListUIState = MutableStateFlow<MaidListUIState>(MaidListUIState.Loading)
     val maidListUIState: StateFlow<MaidListUIState> = _maidListUIState.asStateFlow()
@@ -37,6 +44,9 @@ class MaidViewModel : ViewModel() {
 
     private val _otpState = MutableStateFlow<OtpState>(OtpState.Idle)
     val otpState: StateFlow<OtpState> = _otpState.asStateFlow()
+
+    private val _payrollUIState = MutableStateFlow<PayrollUIState>(PayrollUIState.Loading)
+    val payrollUIState: StateFlow<PayrollUIState> = _payrollUIState.asStateFlow()
 
     private val apiService = RetrofitClient.apiService
 
@@ -55,13 +65,14 @@ class MaidViewModel : ViewModel() {
             }
         }
     }
+
     fun addMaid(name: String, mobile: String, address: String) {
         viewModelScope.launch {
             try {
                 apiService.addMaid(AddMaidRequest(name, mobile, address))
                 fetchMaids()
             } catch (e: Exception) {
-                // Handle error
+                _maidListUIState.value = MaidListUIState.Error(e.message ?: "An error occurred while adding maid")
             }
         }
     }
@@ -86,9 +97,9 @@ class MaidViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.addTask(maidId, AddTaskRequest(name, price, frequency))
-                fetchMaidDetails(maidId) // Refresh details after adding
+                fetchMaidDetails(maidId)
             } catch (e: Exception) {
-                // Handle error state if needed
+                // You can add error handling for the detail screen here
             }
         }
     }
@@ -97,9 +108,25 @@ class MaidViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.deleteTask(maidId, taskId)
-                fetchMaidDetails(maidId) // Refresh details after deleting
+                fetchMaidDetails(maidId)
             } catch (e: Exception) {
-                // Handle error state if needed
+                // You can add error handling for the detail screen here
+            }
+        }
+    }
+
+    fun fetchPayroll(maidId: String) {
+        viewModelScope.launch {
+            _payrollUIState.value = PayrollUIState.Loading
+            try {
+                val response = apiService.getPayroll(maidId)
+                if (response.isSuccessful && response.body() != null) {
+                    _payrollUIState.value = PayrollUIState.Success(response.body()!!)
+                } else {
+                    _payrollUIState.value = PayrollUIState.Error("Failed to calculate payroll")
+                }
+            } catch (e: Exception) {
+                _payrollUIState.value = PayrollUIState.Error(e.message ?: "An error occurred")
             }
         }
     }
@@ -119,6 +146,7 @@ class MaidViewModel : ViewModel() {
             }
         }
     }
+
     fun verifyOtpForAttendance(maidId: String, otp: String, taskName: String) {
         viewModelScope.launch {
             _otpState.value = OtpState.Loading
@@ -126,7 +154,7 @@ class MaidViewModel : ViewModel() {
                 val response = apiService.verifyOtp(maidId, VerifyOtpRequest(otp, taskName))
                 if (response.isSuccessful) {
                     _otpState.value = OtpState.Idle
-                    fetchMaidDetails(maidId) // Refresh details to show new attendance record
+                    fetchMaidDetails(maidId)
                 } else {
                     val errorMsg = response.errorBody()?.string()?.let {
                         com.google.gson.JsonParser().parse(it).asJsonObject.get("msg").asString
@@ -138,6 +166,7 @@ class MaidViewModel : ViewModel() {
             }
         }
     }
+
     fun resetOtpState() {
         _otpState.value = OtpState.Idle
     }

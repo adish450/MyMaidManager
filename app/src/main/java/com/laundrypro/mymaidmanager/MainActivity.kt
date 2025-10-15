@@ -44,13 +44,14 @@ import androidx.navigation.compose.rememberNavController
 import com.google.gson.JsonParser
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
+import com.laundrypro.mymaidmanager.models.PayrollResponse
 import com.laundrypro.mymaidmanager.models.Task
 import com.laundrypro.mymaidmanager.ui.theme.MyMaidManagerTheme
 import com.laundrypro.mymaidmanager.viewmodel.*
+import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-// Define navigation routes
 sealed class Screen(val route: String) {
     object Auth : Screen("auth_screen")
     object MainList : Screen("main_list_screen")
@@ -79,11 +80,10 @@ class MainActivity : ComponentActivity() {
 fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel) {
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
-    // Determine the start destination based on the initial auth state
     val startDestination = when (authState) {
         is AuthState.Authenticated -> Screen.MainList.route
         is AuthState.Unauthenticated -> Screen.Auth.route
-        is AuthState.Unknown -> "loading_screen" // A temporary route for the initial unknown state
+        is AuthState.Unknown -> "loading_screen"
     }
 
     NavHost(navController = navController, startDestination = startDestination) {
@@ -239,6 +239,11 @@ fun MaidDetailScreen(maidId: String, onNavigateUp: () -> Unit) {
 fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
+    val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(key1 = maid.id) {
+        viewModel.fetchPayroll(maid.id)
+    }
 
     if (showAddTaskDialog) {
         AddTaskDialog(
@@ -270,6 +275,7 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item { MaidInfoSection(maid) }
+        item { PayrollSection(payrollState) }
         item {
             TasksSection(
                 tasks = maid.tasks,
@@ -299,6 +305,81 @@ fun MaidInfoSection(maid: Maid) {
         Text("Address: ${maid.address}", style = MaterialTheme.typography.bodyLarge)
     }
 }
+
+@Composable
+fun PayrollSection(state: PayrollUIState) {
+    Column {
+        Text("Current Month's Payroll", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Box(
+                modifier = Modifier.padding(16.dp).fillMaxWidth()
+            ) {
+                when (state) {
+                    is PayrollUIState.Loading -> {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    }
+                    is PayrollUIState.Error -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.Center))
+                    }
+                    is PayrollUIState.Success -> {
+                        PayrollDetails(state.payroll)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PayrollDetails(payroll: PayrollResponse) {
+    val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Billing Cycle: ${payroll.billingCycle.start} to ${payroll.billingCycle.end}",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Divider()
+        PayrollRow("Total Salary:", currencyFormat.format(payroll.totalSalary))
+        PayrollRow("Total Deductions:", currencyFormat.format(payroll.totalDeductions), isDeduction = true)
+        Divider()
+        PayrollRow("Final Payable Amount:", currencyFormat.format(payroll.payableAmount), isTotal = true)
+
+        if (payroll.deductionsBreakdown.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Deductions Breakdown:", style = MaterialTheme.typography.titleSmall)
+            payroll.deductionsBreakdown.forEach { item ->
+                Text(
+                    "  - ${item.taskName}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTotal: Boolean = false) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text = if (isDeduction && !amount.contains("-")) "-$amount" else amount,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal,
+            color = if (isDeduction) MaterialTheme.colorScheme.error else LocalContentColor.current
+        )
+    }
+}
+
 
 @Composable
 fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String) -> Unit) {
@@ -368,7 +449,7 @@ fun AttendanceItem(record: AttendanceRecord) {
             val date = parser.parse(record.date)
             date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: record.date
         } catch (e: Exception) {
-            record.date // Fallback
+            record.date
         }
     }
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -433,16 +514,14 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        MaterialTheme.colorScheme.background
-                    )
+        modifier = Modifier.fillMaxSize().background(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    MaterialTheme.colorScheme.background
                 )
-            ),
+            )
+        ),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -500,6 +579,7 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     }
 }
 
+// ... All other composables (LoginForm, SignUpForm, etc.) are included below for completeness ...
 @Composable
 fun LoginForm(
     onSwitchToSignUp: () -> Unit,
