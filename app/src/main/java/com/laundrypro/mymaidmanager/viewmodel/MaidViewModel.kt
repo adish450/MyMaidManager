@@ -28,7 +28,6 @@ sealed class OtpState {
     data class Error(val message: String) : OtpState()
 }
 
-// New state for Payroll UI
 sealed class PayrollUIState {
     data object Loading : PayrollUIState()
     data class Success(val payroll: PayrollResponse) : PayrollUIState()
@@ -66,11 +65,18 @@ class MaidViewModel : ViewModel() {
         }
     }
 
+    // --- THIS FUNCTION IS UPDATED ---
     fun addMaid(name: String, mobile: String, address: String) {
         viewModelScope.launch {
             try {
-                apiService.addMaid(AddMaidRequest(name, mobile, address))
-                fetchMaids()
+                val response = apiService.addMaid(AddMaidRequest(name, mobile, address))
+                if (response.isSuccessful) {
+                    // THE FIX: After a successful add, refresh the list.
+                    fetchMaids()
+                } else {
+                    // Optionally, handle the error case, e.g., show a toast
+                    _maidListUIState.value = MaidListUIState.Error("Failed to add maid. Please try again.")
+                }
             } catch (e: Exception) {
                 _maidListUIState.value = MaidListUIState.Error(e.message ?: "An error occurred while adding maid")
             }

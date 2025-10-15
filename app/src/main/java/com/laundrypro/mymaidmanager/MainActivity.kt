@@ -53,9 +53,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 sealed class Screen(val route: String) {
-    object Auth : Screen("auth_screen")
-    object MainList : Screen("main_list_screen")
-    object MaidDetail : Screen("maid_detail_screen/{maidId}") {
+    data object Auth : Screen("auth_screen")
+    data object MainList : Screen("main_list_screen")
+    data object MaidDetail : Screen("maid_detail_screen/{maidId}") {
         fun createRoute(maidId: String) = "maid_detail_screen/$maidId"
     }
 }
@@ -319,15 +319,9 @@ fun PayrollSection(state: PayrollUIState) {
                 modifier = Modifier.padding(16.dp).fillMaxWidth()
             ) {
                 when (state) {
-                    is PayrollUIState.Loading -> {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    }
-                    is PayrollUIState.Error -> {
-                        Text(state.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.Center))
-                    }
-                    is PayrollUIState.Success -> {
-                        PayrollDetails(state.payroll)
-                    }
+                    is PayrollUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    is PayrollUIState.Error -> Text(state.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.Center))
+                    is PayrollUIState.Success -> PayrollDetails(state.payroll)
                 }
             }
         }
@@ -339,24 +333,18 @@ fun PayrollDetails(payroll: PayrollResponse) {
     val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            "Billing Cycle: ${payroll.billingCycle.start} to ${payroll.billingCycle.end}",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Divider()
+        Text("Billing Cycle: ${payroll.billingCycle.start} to ${payroll.billingCycle.end}", style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider()
         PayrollRow("Total Salary:", currencyFormat.format(payroll.totalSalary))
         PayrollRow("Total Deductions:", currencyFormat.format(payroll.totalDeductions), isDeduction = true)
-        Divider()
+        HorizontalDivider()
         PayrollRow("Final Payable Amount:", currencyFormat.format(payroll.payableAmount), isTotal = true)
 
         if (payroll.deductionsBreakdown.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("Deductions Breakdown:", style = MaterialTheme.typography.titleSmall)
             payroll.deductionsBreakdown.forEach { item ->
-                Text(
-                    "  - ${item.taskName}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("  - ${item.taskName}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -365,18 +353,9 @@ fun PayrollDetails(payroll: PayrollResponse) {
 @Composable
 fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTotal: Boolean = false) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
-        )
+        Text(text = label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal)
         Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = if (isDeduction && !amount.contains("-")) "-$amount" else amount,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal,
-            color = if (isDeduction) MaterialTheme.colorScheme.error else LocalContentColor.current
-        )
+        Text(text = if (isDeduction && !amount.contains("-")) "-$amount" else amount, style = MaterialTheme.typography.bodyLarge, fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal, color = if (isDeduction) MaterialTheme.colorScheme.error else LocalContentColor.current)
     }
 }
 
@@ -384,11 +363,7 @@ fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTo
 @Composable
 fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String) -> Unit) {
     Column {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text("Tasks", style = MaterialTheme.typography.headlineSmall)
             IconButton(onClick = onAddTask) { Icon(Icons.Default.AddCircle, "Add Task") }
         }
@@ -403,10 +378,7 @@ fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String
 
 @Composable
 fun TaskItem(task: Task, onDelete: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.weight(1f)) {
             Text(task.name, fontWeight = FontWeight.Bold)
             Text("₹${task.price} - ${task.frequency}", style = MaterialTheme.typography.bodySmall)
@@ -480,6 +452,54 @@ fun AddTaskDialog(
                     Button(onClick = {
                         onAddTask(name, price.toDoubleOrNull() ?: 0.0, frequency)
                     }) { Text("Add Task") }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+fun AddMaidDialog(
+    onDismiss: () -> Unit,
+    onAddMaid: (name: String, mobile: String, address: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+
+    val isMobileValid = mobile.length == 10
+    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
+                    label = { Text("Mobile Number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    leadingIcon = { Text("+91 ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = mobile.isNotEmpty() && !isMobileValid
+                )
+                if (mobile.isNotEmpty() && !isMobileValid) {
+                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                }
+                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onAddMaid(name, "+91$mobile", address) }, enabled = isButtonEnabled) { Text("Add") }
                 }
             }
         }
@@ -579,7 +599,6 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     }
 }
 
-// ... All other composables (LoginForm, SignUpForm, etc.) are included below for completeness ...
 @Composable
 fun LoginForm(
     onSwitchToSignUp: () -> Unit,
@@ -757,41 +776,6 @@ private fun validatePassword(password: String): List<String> {
 }
 
 @Composable
-fun AddMaidDialog(
-    onDismiss: () -> Unit,
-    onAddMaid: (name: String, mobile: String, address: String) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var mobile by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
-    val isButtonEnabled = name.isNotBlank() && mobile.isNotBlank() && address.isNotBlank()
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Mobile Number") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { onAddMaid(name, mobile, address) }, enabled = isButtonEnabled) { Text("Add") }
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
 fun AttendanceOtpDialog(
     maidName: String,
     viewModel: MaidViewModel,
@@ -804,10 +788,10 @@ fun AttendanceOtpDialog(
 
     LaunchedEffect(otpState) {
         if (otpState is OtpState.OtpRequested) {
-            Toast.makeText(context, "OTP sent to maid's mobile (check server console)", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "OTP has been sent to the maid's mobile.", Toast.LENGTH_LONG).show()
         }
-        if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success || viewModel.maidListUIState.value is MaidListUIState.Success)) {
-            Toast.makeText(context, "Attendance Marked!", Toast.LENGTH_SHORT).show()
+        if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
+            Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
             onDismiss()
         }
     }
