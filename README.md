@@ -1,78 +1,41 @@
-# **Maid Management App**
+# **My Maid Manager (Android App) 📱**
 
-A native Android application designed to help households efficiently manage domestic help. This app streamlines task assignment, tracks biometric attendance, and automates monthly payroll calculations, making the entire process transparent and hassle-free.
+This is the native Android application for My Maid Manager, designed to help users manage household staff, track tasks, verify attendance via OTP, and calculate monthly payroll.
 
-## **✨ Key Features**
+## **✨ Features**
 
-* **👤 User & Maid Profiles:** Secure registration for employers and comprehensive profile management for maids, including personal details and photos.  
-* **👆 Biometric Attendance:** Secure and accurate attendance logging for each task using the maid's fingerprint. No more manual tracking\!  
-* **📋 Task & Payroll Management:**  
-  * Create custom tasks (cleaning, cooking, etc.).  
-  * Assign a price and a specific frequency (daily, alternate days, weekly) to each task.  
-  * The app automatically calculates the monthly salary based on completed tasks, deducting amounts for missed days.  
-* **📞 Direct Communication:** Instantly call a maid directly from their profile within the app.  
-* **☁️ Cloud-Powered:** All data is securely stored on a cloud server, ensuring it's always available and backed up.
+* **👤 User Authentication:** Secure user registration and login using JWT. Session persistence ensures users stay logged in.  
+* **🧹 Maid Management:** Add new maids with their contact details. View a list of all maids.  
+* **📄 Maid Details:** View detailed information for a specific maid.  
+* **📝 Task Management:** Add tasks with price and frequency for each maid. Delete tasks.  
+* **📲 OTP Attendance Verification:** Securely mark attendance for specific tasks using Twilio Verify for OTP generation and verification sent via SMS.  
+* **📅 Attendance History:** View the recent attendance records for each maid.  
+* **💰 Payroll Calculation:** View the calculated salary for the current month based on assigned tasks and attendance records.  
+* **🎨 Modern UI:** Built with Jetpack Compose using Material 3 design principles.
 
-## **🛠️ Tech Stack & Architecture**
+## **🛠️ Tech Stack**
 
-This project is built with a modern, scalable, and maintainable tech stack, following SOLID principles and an MVVM architecture for the Android client.
-
-### **Client-Side (Android App)**
-
-* **Language:** [Kotlin](https://kotlinlang.org/)  
-* **UI Toolkit:** [Jetpack Compose](https://developer.android.com/jetpack/compose)  
+* **Language:** Kotlin  
+* **UI Toolkit:** Jetpack Compose (Material 3\)  
 * **Architecture:** MVVM (Model-View-ViewModel)  
-* **Biometrics:** Android BiometricPrompt API
+* **Networking:** Retrofit & OkHttp  
+* **Navigation:** Jetpack Navigation Compose  
+* **Security:** EncryptedSharedPreferences (for session token)
 
-### **Server-Side (Backend)**
+## **🚀 Setup**
 
-* **Framework:** [Node.js](https://nodejs.org/) with [Express.js](https://expressjs.com/)  
-* **Database:** [MongoDB](https://www.mongodb.com/) (hosted on MongoDB Atlas or AWS DocumentDB)  
-* **Authentication:** JSON Web Tokens (JWT)  
-* **File Storage:** [Amazon S3](https://aws.amazon.com/s3/) for profile pictures  
-* **Hosting:** [AWS EC2](https://aws.amazon.com/ec2/)
+1. **Clone the repository:**  
+   git clone https://github.com/adish450/MyMaidManager
 
-## **🚀 Getting Started**
+2. **Open in Android Studio:** Open the cloned project folder in the latest stable version of Android Studio.  
+3. **Configure Backend URL:**  
+   * Open the file app/src/main/java/com/laundrypro/mymaidmanager/network/RetrofitClient.kt.  
+   * Find the BASE\_URL constant.  
+   * Replace the placeholder IP address with the actual Public IPv4 address of your running backend server (e.g., http://YOUR\_EC2\_IP:5000/).  
+4. **Build and Run:** Build the project and run it on an Android emulator or a physical device.
 
-To get a local copy up and running, follow these simple steps.
+## **🔗 Backend**
 
-### **Prerequisites**
+This application requires the corresponding backend API to function. The backend repository can be found here:
 
-* Android Studio (latest version)  
-* Node.js & npm  
-* MongoDB instance (local or cloud)  
-* AWS Account for S3
-
-### **Installation**
-
-1. **Clone the repo**  
-   git clone \[https://github.com/your-username/maid-management-app.git\](https://github.com/your-username/maid-management-app.git)
-
-2. **Backend Setup**  
-   \# Navigate to the server directory  
-   cd server/
-
-   \# Install NPM packages  
-   npm install
-
-   \# Create a .env file and add your configuration (DB\_URI, JWT\_SECRET, AWS\_KEYS)  
-   cp .env.example .env
-
-   \# Start the server  
-   npm start
-
-3. **Android App Setup**  
-   * Open the /android folder in Android Studio.  
-   * Let Gradle sync the dependencies.  
-   * Update the API base URL in the network configuration file to point to your local server's address.  
-   * Build and run the app on an emulator or a physical device.
-
-## **📄 License**
-
-Distributed under the MIT License. See LICENSE.txt for more information.
-
-## **📧 Contact**
-
-Your Name \- [@your\_twitter](https://www.google.com/search?q=https://twitter.com/your_twitter) \- email@example.com
-
-Project Link: [https://github.com/your-username/maid-management-app](https://www.google.com/search?q=https://github.com/your-username/maid-management-app)
+https://github.com/adish450/MyMaidManagerBackend
