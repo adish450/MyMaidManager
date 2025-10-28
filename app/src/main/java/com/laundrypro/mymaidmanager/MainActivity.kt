@@ -1,6 +1,7 @@
 package com.laundrypro.mymaidmanager
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,13 +36,17 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.fragment.app.FragmentActivity // Ensure this is present
+import androidx.fragment.app.FragmentManager // <-- Import FragmentManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.gson.JsonParser
+// Adjust import path based on your package structure
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
 import com.laundrypro.mymaidmanager.models.PayrollResponse
@@ -52,15 +57,19 @@ import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
+// Add a TAG for logging
+private const val TAG = "MainActivity"
+
+// Define navigation routes
 sealed class Screen(val route: String) {
-    data object Auth : Screen("auth_screen")
-    data object MainList : Screen("main_list_screen")
-    data object MaidDetail : Screen("maid_detail_screen/{maidId}") {
+    object Auth : Screen("auth_screen")
+    object MainList : Screen("main_list_screen")
+    object MaidDetail : Screen("maid_detail_screen/{maidId}") {
         fun createRoute(maidId: String) = "maid_detail_screen/$maidId"
     }
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() { // Changed to FragmentActivity
     private val authViewModel: AuthViewModel by viewModels {
         AuthViewModelFactory(application)
     }
@@ -70,14 +79,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyMaidManagerTheme {
                 val navController = rememberNavController()
-                AppNavigator(navController, authViewModel)
+                // --- Pass FragmentManager from the Activity ---
+                AppNavigator(navController, authViewModel, supportFragmentManager)
             }
         }
     }
 }
 
+// --- AppNavigator now accepts FragmentManager ---
 @Composable
-fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel) {
+fun AppNavigator(
+    navController: NavHostController,
+    authViewModel: AuthViewModel,
+    fragmentManager: FragmentManager // <-- Accept FragmentManager
+) {
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
     val startDestination = when (authState) {
@@ -110,14 +125,27 @@ fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel)
         composable(Screen.MaidDetail.route) { backStackEntry ->
             val maidId = backStackEntry.arguments?.getString("maidId")
             if (maidId != null) {
-                MaidDetailScreen(maidId = maidId, onNavigateUp = { navController.navigateUp() })
+                // --- Pass FragmentManager down ---
+                MaidDetailScreen(
+                    maidId = maidId,
+                    fragmentManager = fragmentManager, // <-- Pass it here
+                    onNavigateUp = { navController.navigateUp() }
+                )
+            } else {
+                // Fallback or error handling if maidId is unexpectedly null
+                LaunchedEffect(Unit) { navController.navigateUp() }
             }
         }
     }
 
     LaunchedEffect(authState) {
+        // Handle auto navigation on auth state changes
         if (authState is AuthState.Unauthenticated && navController.currentDestination?.route != Screen.Auth.route) {
             navController.navigate(Screen.Auth.route) { popUpTo(0) }
+        }
+        // Navigate to main list if authenticated and still on loading screen
+        if (authState is AuthState.Authenticated && navController.currentDestination?.route == "loading_screen") {
+            navController.navigate(Screen.MainList.route) { popUpTo(0) }
         }
     }
 }
@@ -130,12 +158,16 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
     val uiState by maidViewModel.maidListUIState.collectAsStateWithLifecycle()
     var showAddMaidDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        maidViewModel.fetchMaids()
+    // Fetch maids when the screen is first composed or if the state is Error
+    LaunchedEffect(uiState) {
+        // Only fetch if currently loading or in error state to avoid re-fetching on success
+        if (uiState is MaidListUIState.Loading || uiState is MaidListUIState.Error) {
+            maidViewModel.fetchMaids()
+        }
     }
 
     if (showAddMaidDialog) {
-        AddMaidDialog(
+        AddMaidDialog( // Calling the AddMaidDialog composable
             onDismiss = { showAddMaidDialog = false },
             onAddMaid = { name, mobile, address ->
                 maidViewModel.addMaid(name, mobile, address)
@@ -178,11 +210,82 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
                         }
                     }
                 }
-                is MaidListUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center))
+                is MaidListUIState.Error -> Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(state.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = { maidViewModel.fetchMaids() }) { Text("Retry") }
+                }
             }
         }
     }
 }
+
+// --- AddMaidDialog Definition ---
+@Composable
+fun AddMaidDialog(
+    onDismiss: () -> Unit,
+    onAddMaid: (name: String, mobile: String, address: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+
+    val isMobileValid = mobile.length == 10
+    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
+                    label = { Text("Mobile Number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    leadingIcon = { Text("+91 ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = mobile.isNotEmpty() && !isMobileValid,
+                    singleLine = true
+                )
+                if (mobile.isNotEmpty() && !isMobileValid) {
+                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                }
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Address") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onAddMaid(name, "+91$mobile", address) },
+                        enabled = isButtonEnabled
+                    ) { Text("Add") }
+                }
+            }
+        }
+    }
+}
+// --- End AddMaidDialog Definition ---
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -195,17 +298,22 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(maid.name, style = MaterialTheme.typography.titleMedium)
-            Text(maid.mobile, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            Text(maid.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Text(maid.name ?: "", style = MaterialTheme.typography.titleMedium)
+            Text(maid.mobile ?: "", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Text(maid.address ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         }
     }
 }
 
 
+// --- MaidDetailScreen now accepts FragmentManager ---
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MaidDetailScreen(maidId: String, onNavigateUp: () -> Unit) {
+fun MaidDetailScreen(
+    maidId: String,
+    fragmentManager: FragmentManager, // <-- Accept FragmentManager
+    onNavigateUp: () -> Unit
+) {
     val viewModel: MaidViewModel = viewModel()
     val uiState by viewModel.maidDetailUIState.collectAsStateWithLifecycle()
 
@@ -228,22 +336,60 @@ fun MaidDetailScreen(maidId: String, onNavigateUp: () -> Unit) {
         Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             when (val state = uiState) {
                 is MaidDetailUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                is MaidDetailUIState.Success -> MaidDetailContent(maid = state.maid, viewModel = viewModel)
-                is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center))
+                is MaidDetailUIState.Success -> MaidDetailContent(
+                    maid = state.maid,
+                    viewModel = viewModel,
+                    fragmentManager = fragmentManager // <-- Pass it down
+                )
+                is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
 
+// --- MaidDetailContent now accepts FragmentManager ---
 @Composable
-fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
+fun MaidDetailContent(
+    maid: Maid,
+    viewModel: MaidViewModel,
+    fragmentManager: FragmentManager // <-- Accept FragmentManager
+) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
+    var showManualAttendanceDialog by remember { mutableStateOf(false) }
     val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
+    var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
+    val context = LocalContext.current // Keep context for Toasts
 
-    LaunchedEffect(key1 = maid.id) {
-        viewModel.fetchPayroll(maid.id)
+    // --- Date Picker Launcher Function ---
+    // Now accepts FragmentManager explicitly
+    fun showDatePicker(fm: FragmentManager?, currentSelection: Long?, onDateSelected: (Long) -> Unit) {
+        Log.d(TAG, "showDatePicker function called")
+        if (fm == null) {
+            Log.e(TAG, "showDatePicker failed: FragmentManager provided is null!")
+            Toast.makeText(context, "Error: Cannot find activity's fragment manager.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val picker = MaterialDatePicker.Builder.datePicker()
+            .setTitleText("Select Date")
+            .setSelection(currentSelection ?: MaterialDatePicker.todayInUtcMilliseconds())
+            .build()
+        picker.addOnPositiveButtonClickListener {
+            Log.d(TAG, "Date selected: $it ms (UTC)")
+            onDateSelected(it)
+        }
+        try {
+            Log.d(TAG, "Attempting to show DatePicker using provided FragmentManager...")
+            picker.show(fm, picker.toString()) // Use the passed FragmentManager
+            Log.d(TAG, "DatePicker show() called successfully.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing DatePicker: ${e.message}", e)
+            Toast.makeText(context, "Could not display date picker: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
+    // --- End Date Picker Launcher ---
+
+    LaunchedEffect(key1 = maid.id) { viewModel.fetchPayroll(maid.id) }
 
     if (showAddTaskDialog) {
         AddTaskDialog(
@@ -257,16 +403,46 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
 
     showAttendanceDialog?.let { task ->
         AttendanceOtpDialog(
-            maidName = maid.name,
+            maidName = maid.name ?: "Maid",
             viewModel = viewModel,
             onDismiss = {
                 viewModel.resetOtpState()
                 showAttendanceDialog = null
             },
             onVerify = { otp ->
-                viewModel.verifyOtpForAttendance(maid.id, otp, task.name)
+                viewModel.verifyOtpForAttendance(maid.id, otp, task.name ?: "")
             }
         )
+    }
+
+    Log.d(TAG, "showManualAttendanceDialog state: $showManualAttendanceDialog")
+    if (showManualAttendanceDialog) {
+        Log.d(TAG, "Rendering ManualAttendanceDialog")
+        ManualAttendanceDialog(
+            tasks = maid.tasks ?: emptyList(),
+            selectedDateMillis = selectedDateMillis,
+            fragmentManager = fragmentManager, // <-- Pass FragmentManager down
+            onDismiss = {
+                Log.d(TAG, "ManualAttendanceDialog dismissed")
+                showManualAttendanceDialog = false
+                selectedDateMillis = null
+            },
+            onConfirm = { date, taskName, status ->
+                Log.d(TAG, "ManualAttendanceDialog confirmed: Date=$date, Task=$taskName, Status=$status")
+                viewModel.addManualAttendance(maid.id, date, taskName, status)
+                showManualAttendanceDialog = false
+                selectedDateMillis = null
+            },
+            // Pass a lambda that calls showDatePicker, providing the fragmentManager AND the update logic
+            onSelectDateClicked = { fm -> // Lambda accepts FragmentManager?
+                Log.d(TAG, "onSelectDateClicked callback received")
+                showDatePicker(fm, selectedDateMillis) { newDateMillis ->
+                    selectedDateMillis = newDateMillis // Update state here
+                }
+            }
+        )
+    } else {
+        Log.d(TAG, "ManualAttendanceDialog should NOT be rendered")
     }
 
     LazyColumn(
@@ -278,18 +454,23 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
         item { PayrollSection(payrollState) }
         item {
             TasksSection(
-                tasks = maid.tasks,
+                tasks = maid.tasks ?: emptyList(),
                 onAddTask = { showAddTaskDialog = true },
                 onDeleteTask = { taskId -> viewModel.deleteTask(maid.id, taskId) }
             )
         }
         item {
             AttendanceSection(
-                attendance = maid.attendance,
-                tasks = maid.tasks,
+                attendance = maid.attendance ?: emptyList(),
+                tasks = maid.tasks ?: emptyList(),
                 onMarkAttendance = { task ->
                     viewModel.requestOtpForAttendance(maid.id)
                     showAttendanceDialog = task
+                },
+                onMarkAbsent = {
+                    Log.d(TAG, "Mark Absent Button Clicked - Setting showManualAttendanceDialog to true")
+                    selectedDateMillis = MaterialDatePicker.todayInUtcMilliseconds()
+                    showManualAttendanceDialog = true
                 }
             )
         }
@@ -299,10 +480,10 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
 @Composable
 fun MaidInfoSection(maid: Maid) {
     Column {
-        Text(maid.name, style = MaterialTheme.typography.headlineMedium)
+        Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Mobile: ${maid.mobile}", style = MaterialTheme.typography.bodyLarge)
-        Text("Address: ${maid.address}", style = MaterialTheme.typography.bodyLarge)
+        Text("Mobile: ${maid.mobile ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
+        Text("Address: ${maid.address ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -333,18 +514,18 @@ fun PayrollDetails(payroll: PayrollResponse) {
     val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Billing Cycle: ${payroll.billingCycle.start} to ${payroll.billingCycle.end}", style = MaterialTheme.typography.bodySmall)
-        HorizontalDivider()
+        Text("Billing Cycle: ${payroll.billingCycle.start ?: ""} to ${payroll.billingCycle.end ?: ""}", style = MaterialTheme.typography.bodySmall)
+        Divider()
         PayrollRow("Total Salary:", currencyFormat.format(payroll.totalSalary))
         PayrollRow("Total Deductions:", currencyFormat.format(payroll.totalDeductions), isDeduction = true)
-        HorizontalDivider()
+        Divider()
         PayrollRow("Final Payable Amount:", currencyFormat.format(payroll.payableAmount), isTotal = true)
 
         if (payroll.deductionsBreakdown.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("Deductions Breakdown:", style = MaterialTheme.typography.titleSmall)
             payroll.deductionsBreakdown.forEach { item ->
-                Text("  - ${item.taskName}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}", style = MaterialTheme.typography.bodySmall)
+                Text("  - ${item.taskName ?: "Unknown Task"}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -380,34 +561,56 @@ fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String
 fun TaskItem(task: Task, onDelete: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(task.name, fontWeight = FontWeight.Bold)
-            Text("₹${task.price} - ${task.frequency}", style = MaterialTheme.typography.bodySmall)
+            Text(task.name ?: "", fontWeight = FontWeight.Bold)
+            Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
         }
         IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete Task") }
     }
 }
 
 @Composable
-fun AttendanceSection(attendance: List<AttendanceRecord>, tasks: List<Task>, onMarkAttendance: (Task) -> Unit) {
+fun AttendanceSection(
+    attendance: List<AttendanceRecord>,
+    tasks: List<Task>,
+    onMarkAttendance: (Task) -> Unit,
+    onMarkAbsent: () -> Unit
+) {
     Column {
         Text("Attendance", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Mark attendance for:", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Mark Today's Attendance:", style = MaterialTheme.typography.titleMedium)
         if (tasks.isEmpty()) {
-            Text("Add a task to mark attendance.", style = MaterialTheme.typography.bodySmall)
+            Text("Add a task first.", style = MaterialTheme.typography.bodySmall)
         } else {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Present (OTP):", modifier = Modifier.align(Alignment.CenterVertically))
                 tasks.forEach { task ->
-                    Button(onClick = { onMarkAttendance(task) }) { Text(task.name) }
+                    Button(onClick = { onMarkAttendance(task) }) { Text(task.name ?: "") }
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onMarkAbsent) {
+                Text("Manually Mark Absent")
+            }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("History (Last 5)", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
         if (attendance.isEmpty()) {
             Text("No attendance records yet.")
         } else {
-            attendance.take(5).forEach { record -> AttendanceItem(record) }
+            val sortedAttendance = attendance.sortedByDescending {
+                try {
+                    val dateString = it.date ?: ""
+                    val pattern = if (dateString.contains('.')) "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" else "yyyy-MM-dd'T'HH:mm:ss'Z'"
+                    val parser = SimpleDateFormat(pattern, Locale.getDefault())
+                    parser.timeZone = TimeZone.getTimeZone("UTC")
+                    parser.parse(dateString)?.time ?: 0L
+                } catch (e: Exception) { 0L }
+            }
+            sortedAttendance.take(5).forEach { record -> AttendanceItem(record) }
         }
     }
 }
@@ -416,17 +619,31 @@ fun AttendanceSection(attendance: List<AttendanceRecord>, tasks: List<Task>, onM
 fun AttendanceItem(record: AttendanceRecord) {
     val formattedDate = remember(record.date) {
         try {
-            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
-            parser.timeZone = TimeZone.getTimeZone("UTC")
-            val date = parser.parse(record.date)
-            date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: record.date
+            val dateString = record.date ?: return@remember "Invalid Date"
+            // More robust date parsing for different possible formats from MongoDB ISODate
+            val pattern1 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+            val pattern2 = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            val parser = try {
+                SimpleDateFormat(pattern1, Locale.getDefault())
+            } catch (e: IllegalArgumentException) {
+                SimpleDateFormat(pattern2, Locale.getDefault())
+            }
+            parser.timeZone = TimeZone.getTimeZone("UTC") // Input date is UTC
+            val date = parser.parse(dateString)
+            // Format for display in local time zone
+            date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: dateString
         } catch (e: Exception) {
-            record.date
+            Log.e(TAG, "Date parsing error for '${record.date}': ${e.message}")
+            record.date ?: "Invalid Date" // Fallback
         }
     }
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(formattedDate, modifier = Modifier.weight(1f))
-        Text(record.taskName, fontWeight = FontWeight.Bold)
+        Text(record.taskName ?: "", fontWeight = FontWeight.Bold)
+        // Show status if it's not 'Present'
+        if(record.status != "Present") {
+            Text(" (${record.status ?: ""})", modifier = Modifier.padding(start = 4.dp), color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -444,9 +661,9 @@ fun AddTaskDialog(
         Card(shape = RoundedCornerShape(16.dp)) {
             Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Add New Task", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") })
-                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") })
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
+                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") }, singleLine = true)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
@@ -458,48 +675,97 @@ fun AddTaskDialog(
     }
 }
 
-
+// --- ManualAttendanceDialog now accepts FragmentManager ---
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddMaidDialog(
+fun ManualAttendanceDialog(
+    tasks: List<Task>,
+    selectedDateMillis: Long?,
+    fragmentManager: FragmentManager?, // <-- Accept FragmentManager
     onDismiss: () -> Unit,
-    onAddMaid: (name: String, mobile: String, address: String) -> Unit
+    onConfirm: (date: String, taskName: String, status: String) -> Unit,
+    // --- Callback now accepts FragmentManager? ---
+    onSelectDateClicked: (FragmentManager?) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var mobile by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
+    Log.d(TAG, "Inside ManualAttendanceDialog composable")
+    var selectedTask by remember { mutableStateOf<Task?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    // No need to get context here anymore for the picker
 
-    val isMobileValid = mobile.length == 10
-    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+    val formattedDate = remember(selectedDateMillis) {
+        selectedDateMillis?.let {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            sdf.timeZone = TimeZone.getTimeZone("UTC") // Ensure we format the UTC date
+            sdf.format(Date(it))
+        } ?: ""
+    }
+    Log.d(TAG, "ManualAttendanceDialog received Formatted Date: $formattedDate")
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(8.dp)
-        ) {
+        Card(shape = RoundedCornerShape(16.dp)) {
             Column(
                 modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(
-                    value = mobile,
-                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
-                    label = { Text("Mobile Number") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    leadingIcon = { Text("+91 ") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = mobile.isNotEmpty() && !isMobileValid
-                )
-                if (mobile.isNotEmpty() && !isMobileValid) {
-                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                Text("Mark Attendance Manually", style = MaterialTheme.typography.headlineSmall)
+
+                // --- Button onClick calls callback, passing the FragmentManager it received ---
+                Button(onClick = {
+                    Log.d(TAG, "'Select Date' Button clicked inside Dialog, calling onSelectDateClicked callback with FragmentManager")
+                    onSelectDateClicked(fragmentManager) // Pass the FragmentManager
+                }) {
+                    Text(if (formattedDate.isNotEmpty()) "Date: $formattedDate" else "Select Date")
                 }
-                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+
+                // Task Selection Dropdown
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedTask?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Select Task") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        tasks.forEach { task ->
+                            DropdownMenuItem(
+                                text = { Text(task.name ?: "") },
+                                onClick = {
+                                    selectedTask = task
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                val status = "Absent"
+                Text("Status: $status", style = MaterialTheme.typography.bodyLarge)
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { onAddMaid(name, "+91$mobile", address) }, enabled = isButtonEnabled) { Text("Add") }
+                    Button(
+                        onClick = {
+                            Log.d(TAG, "'Confirm Absent' button clicked")
+                            if (formattedDate.isNotEmpty() && selectedTask != null) {
+                                onConfirm(formattedDate, selectedTask!!.name ?: "", status)
+                            } else {
+                                Log.w(TAG, "Confirm button clicked but date or task missing!")
+                            }
+                        },
+                        enabled = formattedDate.isNotEmpty() && selectedTask != null
+                    ) { Text("Confirm Absent") }
                 }
             }
         }
@@ -519,19 +785,20 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
             val displayMessage = try {
                 JsonParser().parse(errorJsonString).asJsonObject.get("msg").asString
             } catch (e: Exception) {
-                errorJsonString
+                errorJsonString // Fallback to raw message if parsing fails
             }
             Toast.makeText(context, displayMessage, Toast.LENGTH_LONG).show()
             viewModel.resetAuthResult()
         }
     }
 
-    val authState by viewModel.authState.collectAsStateWithLifecycle()
-    LaunchedEffect(authState) {
-        if (authState is AuthState.Authenticated) {
+    // Navigate when authenticated
+    LaunchedEffect(viewModel.authState.collectAsStateWithLifecycle().value) {
+        if (viewModel.authState.value is AuthState.Authenticated) {
             onLoginSuccess()
         }
     }
+
 
     Box(
         modifier = Modifier.fillMaxSize().background(
@@ -623,7 +890,8 @@ fun LoginForm(
             label = { Text("Email") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
@@ -639,7 +907,8 @@ fun LoginForm(
                     Icon(imageVector = image, if (passwordVisible) "Hide password" else "Show password")
                 }
             },
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
 
         Button(
@@ -690,13 +959,15 @@ fun SignUpForm(
 
         OutlinedTextField(
             value = name, onValueChange = { name = it },
-            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), enabled = !isLoading
+            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
             value = email, onValueChange = { email = it },
             label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !isLoading
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
@@ -710,7 +981,8 @@ fun SignUpForm(
                 IconButton(onClick = { passwordVisible = !passwordVisible }) { Icon(imageVector = image, null) }
             },
             isError = password.isNotEmpty() && passwordValidation.isNotEmpty(),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         if (password.isNotEmpty() && passwordValidation.isNotEmpty()) {
             Text(
@@ -732,7 +1004,8 @@ fun SignUpForm(
                 IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) { Icon(imageVector = image, null) }
             },
             isError = confirmPassword.isNotEmpty() && !passwordsMatch,
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         if (confirmPassword.isNotEmpty() && !passwordsMatch) {
             Text(
@@ -790,9 +1063,13 @@ fun AttendanceOtpDialog(
         if (otpState is OtpState.OtpRequested) {
             Toast.makeText(context, "OTP has been sent to the maid's mobile.", Toast.LENGTH_LONG).show()
         }
+        // Check if the verification was successful and reset
         if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
-            Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
-            onDismiss()
+            // A simple way to check if the state *just* became idle after loading/error
+            if (otpValue.isNotEmpty()){ // Check if OTP was attempted
+                Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
+                onDismiss()
+            }
         }
     }
 
@@ -805,7 +1082,7 @@ fun AttendanceOtpDialog(
             ) {
                 Text(text = "Verify Attendance", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    text = "Enter the 6-digit OTP sent to ${maidName}'s mobile.",
+                    text = "Enter the 6-digit OTP sent to ${maidName ?: "Maid"}'s mobile.",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
                 )
@@ -814,7 +1091,8 @@ fun AttendanceOtpDialog(
                     onValueChange = { if (it.length <= 6) otpValue = it.filter { c -> c.isDigit() } },
                     label = { Text("OTP") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 if (otpState is OtpState.Error) {
                     Text(

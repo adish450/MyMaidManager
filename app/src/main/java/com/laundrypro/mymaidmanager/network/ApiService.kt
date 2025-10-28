@@ -36,4 +36,7 @@ interface ApiService {
 
     @POST("api/maids/verify-otp/{maidId}")
     suspend fun verifyOtp(@Path("maidId") maidId: String, @Body verifyOtpRequest: VerifyOtpRequest): Response<Unit>
+
+    @POST("api/maids/{maidId}/attendance/manual")
+    suspend fun addManualAttendance(@Path("maidId") maidId: String, @Body request: AddManualAttendanceRequest): Response<List<AttendanceRecord>>
 }
