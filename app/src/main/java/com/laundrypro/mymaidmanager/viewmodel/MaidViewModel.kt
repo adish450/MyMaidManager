@@ -176,4 +176,23 @@ class MaidViewModel : ViewModel() {
     fun resetOtpState() {
         _otpState.value = OtpState.Idle
     }
+
+    fun addManualAttendance(maidId: String, date: String, taskName: String, status: String) {
+        viewModelScope.launch {
+            // Optionally add a loading state specific to this action if needed
+            try {
+                val response = apiService.addManualAttendance(maidId, AddManualAttendanceRequest(date, taskName, status))
+                if (response.isSuccessful) {
+                    // Refresh details after successfully adding the record
+                    fetchMaidDetails(maidId)
+                    fetchPayroll(maidId) // Also refresh payroll
+                } else {
+                    // Handle error state if needed (e.g., show a toast)
+                    _maidDetailUIState.value = MaidDetailUIState.Error("Failed to add manual attendance record")
+                }
+            } catch (e: Exception) {
+                _maidDetailUIState.value = MaidDetailUIState.Error(e.message ?: "An error occurred")
+            }
+        }
+    }
 }

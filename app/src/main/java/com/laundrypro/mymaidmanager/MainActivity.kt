@@ -35,12 +35,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.gson.JsonParser
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
@@ -52,10 +54,11 @@ import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
+// Define navigation routes
 sealed class Screen(val route: String) {
-    data object Auth : Screen("auth_screen")
-    data object MainList : Screen("main_list_screen")
-    data object MaidDetail : Screen("maid_detail_screen/{maidId}") {
+    object Auth : Screen("auth_screen")
+    object MainList : Screen("main_list_screen")
+    object MaidDetail : Screen("maid_detail_screen/{maidId}") {
         fun createRoute(maidId: String) = "maid_detail_screen/$maidId"
     }
 }
@@ -116,8 +119,13 @@ fun AppNavigator(navController: NavHostController, authViewModel: AuthViewModel)
     }
 
     LaunchedEffect(authState) {
+        // This handles automatic redirection if the user logs out
         if (authState is AuthState.Unauthenticated && navController.currentDestination?.route != Screen.Auth.route) {
             navController.navigate(Screen.Auth.route) { popUpTo(0) }
+        }
+        // This handles initial load when token exists but we start on loading screen
+        if (authState is AuthState.Authenticated && navController.currentDestination?.route == "loading_screen") {
+            navController.navigate(Screen.MainList.route) { popUpTo(0) }
         }
     }
 }
@@ -130,12 +138,13 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
     val uiState by maidViewModel.maidListUIState.collectAsStateWithLifecycle()
     var showAddMaidDialog by remember { mutableStateOf(false) }
 
+    // Fetch maids when the screen is first composed
     LaunchedEffect(Unit) {
         maidViewModel.fetchMaids()
     }
 
     if (showAddMaidDialog) {
-        AddMaidDialog(
+        AddMaidDialog( // Calling the AddMaidDialog composable
             onDismiss = { showAddMaidDialog = false },
             onAddMaid = { name, mobile, address ->
                 maidViewModel.addMaid(name, mobile, address)
@@ -178,11 +187,79 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
                         }
                     }
                 }
-                is MaidListUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center))
+                is MaidListUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
+
+// --- AddMaidDialog Definition ---
+@Composable
+fun AddMaidDialog(
+    onDismiss: () -> Unit,
+    onAddMaid: (name: String, mobile: String, address: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+
+    val isMobileValid = mobile.length == 10
+    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
+                    label = { Text("Mobile Number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    leadingIcon = { Text("+91 ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = mobile.isNotEmpty() && !isMobileValid,
+                    singleLine = true
+                )
+                if (mobile.isNotEmpty() && !isMobileValid) {
+                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                }
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Address") },
+                    modifier = Modifier.fillMaxWidth()
+                    // You might want singleLine = false for address
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onAddMaid(name, "+91$mobile", address) },
+                        enabled = isButtonEnabled
+                    ) { Text("Add") }
+                }
+            }
+        }
+    }
+}
+// --- End AddMaidDialog Definition ---
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -195,9 +272,9 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(maid.name, style = MaterialTheme.typography.titleMedium)
-            Text(maid.mobile, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            Text(maid.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Text(maid.name ?: "", style = MaterialTheme.typography.titleMedium)
+            Text(maid.mobile ?: "", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Text(maid.address ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         }
     }
 }
@@ -229,7 +306,7 @@ fun MaidDetailScreen(maidId: String, onNavigateUp: () -> Unit) {
             when (val state = uiState) {
                 is MaidDetailUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 is MaidDetailUIState.Success -> MaidDetailContent(maid = state.maid, viewModel = viewModel)
-                is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center))
+                is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -239,6 +316,7 @@ fun MaidDetailScreen(maidId: String, onNavigateUp: () -> Unit) {
 fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
+    var showManualAttendanceDialog by remember { mutableStateOf(false) }
     val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
 
     LaunchedEffect(key1 = maid.id) {
@@ -257,14 +335,25 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
 
     showAttendanceDialog?.let { task ->
         AttendanceOtpDialog(
-            maidName = maid.name,
+            maidName = maid.name ?: "Maid",
             viewModel = viewModel,
             onDismiss = {
                 viewModel.resetOtpState()
                 showAttendanceDialog = null
             },
             onVerify = { otp ->
-                viewModel.verifyOtpForAttendance(maid.id, otp, task.name)
+                viewModel.verifyOtpForAttendance(maid.id, otp, task.name ?: "")
+            }
+        )
+    }
+
+    if (showManualAttendanceDialog) {
+        ManualAttendanceDialog(
+            tasks = maid.tasks ?: emptyList(),
+            onDismiss = { showManualAttendanceDialog = false },
+            onConfirm = { date, taskName, status ->
+                viewModel.addManualAttendance(maid.id, date, taskName, status)
+                showManualAttendanceDialog = false
             }
         )
     }
@@ -278,19 +367,20 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
         item { PayrollSection(payrollState) }
         item {
             TasksSection(
-                tasks = maid.tasks,
+                tasks = maid.tasks ?: emptyList(),
                 onAddTask = { showAddTaskDialog = true },
                 onDeleteTask = { taskId -> viewModel.deleteTask(maid.id, taskId) }
             )
         }
         item {
             AttendanceSection(
-                attendance = maid.attendance,
-                tasks = maid.tasks,
+                attendance = maid.attendance ?: emptyList(),
+                tasks = maid.tasks ?: emptyList(),
                 onMarkAttendance = { task ->
                     viewModel.requestOtpForAttendance(maid.id)
                     showAttendanceDialog = task
-                }
+                },
+                onMarkAbsent = { showManualAttendanceDialog = true }
             )
         }
     }
@@ -299,10 +389,10 @@ fun MaidDetailContent(maid: Maid, viewModel: MaidViewModel) {
 @Composable
 fun MaidInfoSection(maid: Maid) {
     Column {
-        Text(maid.name, style = MaterialTheme.typography.headlineMedium)
+        Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Mobile: ${maid.mobile}", style = MaterialTheme.typography.bodyLarge)
-        Text("Address: ${maid.address}", style = MaterialTheme.typography.bodyLarge)
+        Text("Mobile: ${maid.mobile ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
+        Text("Address: ${maid.address ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -333,18 +423,18 @@ fun PayrollDetails(payroll: PayrollResponse) {
     val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Billing Cycle: ${payroll.billingCycle.start} to ${payroll.billingCycle.end}", style = MaterialTheme.typography.bodySmall)
-        HorizontalDivider()
+        Text("Billing Cycle: ${payroll.billingCycle.start ?: ""} to ${payroll.billingCycle.end ?: ""}", style = MaterialTheme.typography.bodySmall)
+        Divider()
         PayrollRow("Total Salary:", currencyFormat.format(payroll.totalSalary))
         PayrollRow("Total Deductions:", currencyFormat.format(payroll.totalDeductions), isDeduction = true)
-        HorizontalDivider()
+        Divider()
         PayrollRow("Final Payable Amount:", currencyFormat.format(payroll.payableAmount), isTotal = true)
 
         if (payroll.deductionsBreakdown.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("Deductions Breakdown:", style = MaterialTheme.typography.titleSmall)
             payroll.deductionsBreakdown.forEach { item ->
-                Text("  - ${item.taskName}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}", style = MaterialTheme.typography.bodySmall)
+                Text("  - ${item.taskName ?: "Unknown Task"}: ${item.missedDays} missed day(s) = -${currencyFormat.format(item.deductionAmount)}", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -380,30 +470,43 @@ fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String
 fun TaskItem(task: Task, onDelete: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(task.name, fontWeight = FontWeight.Bold)
-            Text("₹${task.price} - ${task.frequency}", style = MaterialTheme.typography.bodySmall)
+            Text(task.name ?: "", fontWeight = FontWeight.Bold)
+            Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
         }
         IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete Task") }
     }
 }
 
 @Composable
-fun AttendanceSection(attendance: List<AttendanceRecord>, tasks: List<Task>, onMarkAttendance: (Task) -> Unit) {
+fun AttendanceSection(
+    attendance: List<AttendanceRecord>,
+    tasks: List<Task>,
+    onMarkAttendance: (Task) -> Unit,
+    onMarkAbsent: () -> Unit
+) {
     Column {
         Text("Attendance", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Mark attendance for:", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Mark Today's Attendance:", style = MaterialTheme.typography.titleMedium)
         if (tasks.isEmpty()) {
-            Text("Add a task to mark attendance.", style = MaterialTheme.typography.bodySmall)
+            Text("Add a task first.", style = MaterialTheme.typography.bodySmall)
         } else {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Present (OTP):", modifier = Modifier.align(Alignment.CenterVertically))
                 tasks.forEach { task ->
-                    Button(onClick = { onMarkAttendance(task) }) { Text(task.name) }
+                    Button(onClick = { onMarkAttendance(task) }) { Text(task.name ?: "") }
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onMarkAbsent) {
+                Text("Manually Mark Absent")
+            }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("History (Last 5)", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
         if (attendance.isEmpty()) {
             Text("No attendance records yet.")
         } else {
@@ -416,17 +519,19 @@ fun AttendanceSection(attendance: List<AttendanceRecord>, tasks: List<Task>, onM
 fun AttendanceItem(record: AttendanceRecord) {
     val formattedDate = remember(record.date) {
         try {
-            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+            val dateString = record.date ?: return@remember "Invalid Date"
+            val pattern = if (dateString.contains('.')) "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" else "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            val parser = SimpleDateFormat(pattern, Locale.getDefault())
             parser.timeZone = TimeZone.getTimeZone("UTC")
-            val date = parser.parse(record.date)
-            date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: record.date
+            val date = parser.parse(dateString)
+            date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: dateString
         } catch (e: Exception) {
-            record.date
+            record.date ?: "Invalid Date"
         }
     }
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(formattedDate, modifier = Modifier.weight(1f))
-        Text(record.taskName, fontWeight = FontWeight.Bold)
+        Text(record.taskName ?: "", fontWeight = FontWeight.Bold)
     }
 }
 
@@ -444,9 +549,9 @@ fun AddTaskDialog(
         Card(shape = RoundedCornerShape(16.dp)) {
             Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Add New Task", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") })
-                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") })
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
+                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") }, singleLine = true)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
@@ -458,48 +563,96 @@ fun AddTaskDialog(
     }
 }
 
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddMaidDialog(
+fun ManualAttendanceDialog(
+    tasks: List<Task>,
     onDismiss: () -> Unit,
-    onAddMaid: (name: String, mobile: String, address: String) -> Unit
+    onConfirm: (date: String, taskName: String, status: String) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var mobile by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
+    var selectedTask by remember { mutableStateOf<Task?>(null) }
+    var expanded by remember { mutableStateOf(false) }
 
-    val isMobileValid = mobile.length == 10
-    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+    fun showDatePicker() {
+        val activity = context as? FragmentActivity ?: return
+        val picker = MaterialDatePicker.Builder.datePicker()
+            .setTitleText("Select Date")
+            .setSelection(MaterialDatePicker.todayInUtcMilliseconds())
+            .build()
+
+        picker.addOnPositiveButtonClickListener {
+            selectedDateMillis = it
+        }
+        picker.show(activity.supportFragmentManager, picker.toString())
+    }
+
+    val formattedDate = remember(selectedDateMillis) {
+        selectedDateMillis?.let {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.format(Date(it))
+        } ?: ""
+    }
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(8.dp)
-        ) {
+        Card(shape = RoundedCornerShape(16.dp)) {
             Column(
                 modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(
-                    value = mobile,
-                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
-                    label = { Text("Mobile Number") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    leadingIcon = { Text("+91 ") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = mobile.isNotEmpty() && !isMobileValid
-                )
-                if (mobile.isNotEmpty() && !isMobileValid) {
-                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                Text("Mark Attendance Manually", style = MaterialTheme.typography.headlineSmall)
+
+                Button(onClick = ::showDatePicker) {
+                    Text(if (formattedDate.isNotEmpty()) "Date: $formattedDate" else "Select Date")
                 }
-                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedTask?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Select Task") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        tasks.forEach { task ->
+                            DropdownMenuItem(
+                                text = { Text(task.name ?: "") },
+                                onClick = {
+                                    selectedTask = task
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                val status = "Absent"
+                Text("Status: $status", style = MaterialTheme.typography.bodyLarge)
+
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { onAddMaid(name, "+91$mobile", address) }, enabled = isButtonEnabled) { Text("Add") }
+                    Button(
+                        onClick = {
+                            if (formattedDate.isNotEmpty() && selectedTask != null) {
+                                onConfirm(formattedDate, selectedTask!!.name ?: "", status)
+                            }
+                        },
+                        enabled = formattedDate.isNotEmpty() && selectedTask != null
+                    ) { Text("Confirm Absent") }
                 }
             }
         }
@@ -623,7 +776,8 @@ fun LoginForm(
             label = { Text("Email") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
@@ -639,7 +793,8 @@ fun LoginForm(
                     Icon(imageVector = image, if (passwordVisible) "Hide password" else "Show password")
                 }
             },
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
 
         Button(
@@ -690,13 +845,15 @@ fun SignUpForm(
 
         OutlinedTextField(
             value = name, onValueChange = { name = it },
-            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), enabled = !isLoading
+            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
             value = email, onValueChange = { email = it },
             label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !isLoading
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !isLoading,
+            singleLine = true
         )
 
         OutlinedTextField(
@@ -710,7 +867,8 @@ fun SignUpForm(
                 IconButton(onClick = { passwordVisible = !passwordVisible }) { Icon(imageVector = image, null) }
             },
             isError = password.isNotEmpty() && passwordValidation.isNotEmpty(),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         if (password.isNotEmpty() && passwordValidation.isNotEmpty()) {
             Text(
@@ -732,7 +890,8 @@ fun SignUpForm(
                 IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) { Icon(imageVector = image, null) }
             },
             isError = confirmPassword.isNotEmpty() && !passwordsMatch,
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         if (confirmPassword.isNotEmpty() && !passwordsMatch) {
             Text(
@@ -790,9 +949,13 @@ fun AttendanceOtpDialog(
         if (otpState is OtpState.OtpRequested) {
             Toast.makeText(context, "OTP has been sent to the maid's mobile.", Toast.LENGTH_LONG).show()
         }
+        // Check if the verification was successful and reset
         if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
-            Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
-            onDismiss()
+            // A simple way to check if the state *just* became idle after loading/error
+            if (otpValue.isNotEmpty()){ // Check if OTP was attempted
+                Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
+                onDismiss()
+            }
         }
     }
 
@@ -805,7 +968,7 @@ fun AttendanceOtpDialog(
             ) {
                 Text(text = "Verify Attendance", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    text = "Enter the 6-digit OTP sent to ${maidName}'s mobile.",
+                    text = "Enter the 6-digit OTP sent to ${maidName ?: "Maid"}'s mobile.",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
                 )
@@ -814,7 +977,8 @@ fun AttendanceOtpDialog(
                     onValueChange = { if (it.length <= 6) otpValue = it.filter { c -> c.isDigit() } },
                     label = { Text("OTP") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 if (otpState is OtpState.Error) {
                     Text(
