@@ -40,6 +40,13 @@ sealed class ManualAttendanceState {
     data class Error(val message: String) : ManualAttendanceState()
 }
 
+sealed class MaidDeleteState {
+    object Idle : MaidDeleteState()
+    object Loading : MaidDeleteState()
+    object Success : MaidDeleteState()
+    data class Error(val message: String) : MaidDeleteState()
+}
+
 
 // --- MaidViewModel ---
 class MaidViewModel : ViewModel() {
@@ -57,6 +64,9 @@ class MaidViewModel : ViewModel() {
 
     private val _manualAttendanceState = MutableStateFlow<ManualAttendanceState>(ManualAttendanceState.Idle)
     val manualAttendanceState: StateFlow<ManualAttendanceState> = _manualAttendanceState.asStateFlow()
+
+    private val _deleteState = MutableStateFlow<MaidDeleteState>(MaidDeleteState.Idle)
+    val deleteState: StateFlow<MaidDeleteState> = _deleteState.asStateFlow()
 
     private val apiService = RetrofitClient.apiService
 
@@ -180,6 +190,44 @@ class MaidViewModel : ViewModel() {
 
     fun resetManualAttendanceState() {
         _manualAttendanceState.value = ManualAttendanceState.Idle
+    }
+
+    fun updateMaid(maidId: String, name: String, mobile: String, address: String) {
+        viewModelScope.launch {
+            _maidDetailUIState.value = MaidDetailUIState.Loading
+            try {
+                val response = apiService.updateMaid(maidId, UpdateMaidRequest(name, mobile, address))
+                if (response.isSuccessful && response.body() != null) {
+                    _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                    fetchMaids() // Also refresh the main list
+                } else {
+                    _maidDetailUIState.value = MaidDetailUIState.Error("Failed to update maid")
+                }
+            } catch (e: Exception) {
+                _maidDetailUIState.value = MaidDetailUIState.Error(e.message ?: "An error occurred")
+            }
+        }
+    }
+
+    fun deleteMaid(maidId: String) {
+        viewModelScope.launch {
+            _deleteState.value = MaidDeleteState.Loading
+            try {
+                val response = apiService.deleteMaid(maidId)
+                if (response.isSuccessful) {
+                    _deleteState.value = MaidDeleteState.Success
+                    fetchMaids() // Refresh the main list
+                } else {
+                    _deleteState.value = MaidDeleteState.Error("Failed to delete maid")
+                }
+            } catch (e: Exception) {
+                _deleteState.value = MaidDeleteState.Error(e.message ?: "An error occurred")
+            }
+        }
+    }
+
+    fun resetDeleteState() {
+        _deleteState.value = MaidDeleteState.Idle
     }
 
     fun requestOtpForAttendance(maidId: String) {

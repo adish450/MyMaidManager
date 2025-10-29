@@ -3,7 +3,7 @@ package com.laundrypro.mymaidmanager
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity // Using ComponentActivity
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
@@ -30,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -38,20 +39,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties // Import for dialog properties
-// No longer need FragmentActivity or FragmentManager
-// import androidx.fragment.app.FragmentActivity
-// import androidx.fragment.app.FragmentManager
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-// Remove MaterialDatePicker import
-// import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.gson.JsonParser
-// Adjust import path based on your package structure
+// Adjust import path
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
 import com.laundrypro.mymaidmanager.models.PayrollResponse
@@ -62,10 +58,8 @@ import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-// Add a TAG for logging
 private const val TAG = "MainActivity"
 
-// Define navigation routes
 sealed class Screen(val route: String) {
     object Auth : Screen("auth_screen")
     object MainList : Screen("main_list_screen")
@@ -74,7 +68,6 @@ sealed class Screen(val route: String) {
     }
 }
 
-// Inherit from ComponentActivity
 class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels {
         AuthViewModelFactory(application)
@@ -85,22 +78,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyMaidManagerTheme {
                 val navController = rememberNavController()
-                // --- No longer need to pass FragmentManager ---
                 AppNavigator(navController, authViewModel)
             }
         }
     }
 }
 
-// --- AppNavigator no longer accepts FragmentManager ---
 @Composable
 fun AppNavigator(
     navController: NavHostController,
     authViewModel: AuthViewModel
-    // fragmentManager: FragmentManager // Removed
 ) {
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
-
     val startDestination = when (authState) {
         is AuthState.Authenticated -> Screen.MainList.route
         is AuthState.Unauthenticated -> Screen.Auth.route
@@ -131,11 +120,13 @@ fun AppNavigator(
         composable(Screen.MaidDetail.route) { backStackEntry ->
             val maidId = backStackEntry.arguments?.getString("maidId")
             if (maidId != null) {
-                // --- No longer pass FragmentManager down ---
                 MaidDetailScreen(
                     maidId = maidId,
-                    // fragmentManager = fragmentManager, // Removed
-                    onNavigateUp = { navController.navigateUp() }
+                    onNavigateUp = { navController.navigateUp() },
+                    // New callback for when maid is deleted
+                    onMaidDeleted = {
+                        navController.popBackStack() // Go back to the main list
+                    }
                 )
             } else {
                 LaunchedEffect(Unit) { navController.navigateUp() }
@@ -161,16 +152,14 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
     val uiState by maidViewModel.maidListUIState.collectAsStateWithLifecycle()
     var showAddMaidDialog by remember { mutableStateOf(false) }
 
-    // Fetch maids when the screen is first composed or if the state is Error
     LaunchedEffect(uiState) {
-        // Only fetch if currently loading or in error state to avoid re-fetching on success
         if (uiState is MaidListUIState.Loading || uiState is MaidListUIState.Error) {
             maidViewModel.fetchMaids()
         }
     }
 
     if (showAddMaidDialog) {
-        AddMaidDialog( // Calling the AddMaidDialog composable
+        AddMaidDialog(
             onDismiss = { showAddMaidDialog = false },
             onAddMaid = { name, mobile, address ->
                 maidViewModel.addMaid(name, mobile, address)
@@ -223,7 +212,6 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
     }
 }
 
-// --- AddMaidDialog Definition ---
 @Composable
 fun AddMaidDialog(
     onDismiss: () -> Unit,
@@ -232,28 +220,14 @@ fun AddMaidDialog(
     var name by remember { mutableStateOf("") }
     var mobile by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
-
     val isMobileValid = mobile.length == 10
     val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        Card(shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(8.dp)) {
+            Column(modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Add New Maid", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(
                     value = mobile,
                     onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
@@ -264,32 +238,17 @@ fun AddMaidDialog(
                     isError = mobile.isNotEmpty() && !isMobileValid,
                     singleLine = true
                 )
-                if (mobile.isNotEmpty() && !isMobileValid) {
-                    Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
-                }
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("Address") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
+                if (mobile.isNotEmpty() && !isMobileValid) { Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth()) }
+                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { onAddMaid(name, "+91$mobile", address) },
-                        enabled = isButtonEnabled
-                    ) { Text("Add") }
+                    Button(onClick = { onAddMaid(name, "+91$mobile", address) }, enabled = isButtonEnabled) { Text("Add") }
                 }
             }
         }
     }
 }
-// --- End AddMaidDialog Definition ---
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -313,10 +272,30 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
 @Composable
 fun MaidDetailScreen(
     maidId: String,
-    onNavigateUp: () -> Unit
+    onNavigateUp: () -> Unit,
+    onMaidDeleted: () -> Unit // <-- Accept new callback
 ) {
     val viewModel: MaidViewModel = viewModel()
     val uiState by viewModel.maidDetailUIState.collectAsStateWithLifecycle()
+    val deleteState by viewModel.deleteState.collectAsStateWithLifecycle()
+
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+    // Listen for delete success and navigate up
+    LaunchedEffect(deleteState) {
+        if (deleteState is MaidDeleteState.Success) {
+            Toast.makeText(context, "Maid deleted", Toast.LENGTH_SHORT).show()
+            viewModel.resetDeleteState()
+            onMaidDeleted() // Navigate back
+        }
+        if(deleteState is MaidDeleteState.Error) {
+            Toast.makeText(context, (deleteState as MaidDeleteState.Error).message, Toast.LENGTH_SHORT).show()
+            viewModel.resetDeleteState()
+        }
+    }
 
     LaunchedEffect(key1 = maidId) {
         viewModel.fetchMaidDetails(maidId)
@@ -330,6 +309,15 @@ fun MaidDetailScreen(
                     IconButton(onClick = onNavigateUp) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                // --- ADDED ACTIONS ---
+                actions = {
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Maid")
+                    }
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Maid")
+                    }
                 }
             )
         }
@@ -337,17 +325,42 @@ fun MaidDetailScreen(
         Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             when (val state = uiState) {
                 is MaidDetailUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                is MaidDetailUIState.Success -> MaidDetailContent(
-                    maid = state.maid,
-                    viewModel = viewModel
-                )
+                is MaidDetailUIState.Success -> {
+                    // Pass current maid data to dialogs
+                    if (showEditDialog) {
+                        EditMaidDialog(
+                            maid = state.maid,
+                            onDismiss = { showEditDialog = false },
+                            onConfirm = { name, mobile, address ->
+                                viewModel.updateMaid(maidId, name, mobile, address)
+                                showEditDialog = false
+                            }
+                        )
+                    }
+                    if (showDeleteDialog) {
+                        DeleteConfirmationDialog(
+                            maidName = state.maid.name,
+                            onDismiss = { showDeleteDialog = false },
+                            onConfirm = {
+                                viewModel.deleteMaid(maidId)
+                                showDeleteDialog = false
+                            },
+                            isLoading = deleteState is MaidDeleteState.Loading
+                        )
+                    }
+
+                    MaidDetailContent(
+                        maid = state.maid,
+                        viewModel = viewModel
+                    )
+                }
                 is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class) // Needed for rememberDatePickerState
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaidDetailContent(
     maid: Maid,
@@ -472,6 +485,80 @@ fun MaidDetailContent(
             )
         }
     }
+}
+
+// --- NEW DIALOG: EditMaidDialog ---
+@Composable
+fun EditMaidDialog(
+    maid: Maid,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, mobile: String, address: String) -> Unit
+) {
+    // Pre-fill state with existing maid data
+    var name by remember { mutableStateOf(maid.name ?: "") }
+    // Remove "+91" prefix for editing, as the UI adds it
+    var mobile by remember { mutableStateOf(maid.mobile?.removePrefix("+91") ?: "") }
+    var address by remember { mutableStateOf(maid.address ?: "") }
+
+    val isMobileValid = mobile.length == 10
+    val isButtonEnabled = name.isNotBlank() && isMobileValid && address.isNotBlank()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(8.dp)) {
+            Column(modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Edit Maid", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { if (it.length <= 10) mobile = it.filter { c -> c.isDigit() } },
+                    label = { Text("Mobile Number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    leadingIcon = { Text("+91 ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = mobile.isNotEmpty() && !isMobileValid,
+                    singleLine = true
+                )
+                if (mobile.isNotEmpty() && !isMobileValid) { Text("Please enter a valid 10-digit mobile number.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth()) }
+                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirm(name, "+91$mobile", address) }, enabled = isButtonEnabled) { Text("Update") }
+                }
+            }
+        }
+    }
+}
+
+// --- NEW DIALOG: DeleteConfirmationDialog ---
+@Composable
+fun DeleteConfirmationDialog(
+    maidName: String,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete Maid") },
+        text = { Text("Are you sure you want to delete ${maidName ?: "this maid"}? This action cannot be undone.") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !isLoading,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                } else {
+                    Text("Delete")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Cancel") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

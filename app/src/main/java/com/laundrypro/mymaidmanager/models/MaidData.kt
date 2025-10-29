@@ -3,10 +3,9 @@ package com.laundrypro.mymaidmanager.models
 import com.google.gson.annotations.SerializedName
 
 data class Maid(
-    @SerializedName("_id") // Maps the JSON "_id" field to our "id" variable
+    @SerializedName("_id")
     val id: String,
     val name: String,
-    @SerializedName("mobileNo")
     val mobile: String,
     val address: String,
     val user: String,
@@ -32,7 +31,12 @@ data class AttendanceRecord(
 
 data class AddMaidRequest(
     val name: String,
-    @SerializedName("mobileNo")
+    val mobile: String,
+    val address: String
+)
+
+data class UpdateMaidRequest(
+    val name: String,
     val mobile: String,
     val address: String
 )

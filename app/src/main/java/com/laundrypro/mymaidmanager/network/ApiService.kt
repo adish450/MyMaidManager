@@ -21,6 +21,12 @@ interface ApiService {
     @POST("api/maids")
     suspend fun addMaid(@Body addMaidRequest: AddMaidRequest): Response<Maid>
 
+    @PUT("api/maids/{id}")
+    suspend fun updateMaid(@Path("id") maidId: String, @Body updateMaidRequest: UpdateMaidRequest): Response<Maid>
+
+    @DELETE("api/maids/{id}")
+    suspend fun deleteMaid(@Path("id") maidId: String): Response<Unit>
+
     // New payroll endpoint
     @GET("api/maids/{maidId}/payroll")
     suspend fun getPayroll(@Path("maidId") maidId: String): Response<PayrollResponse>
