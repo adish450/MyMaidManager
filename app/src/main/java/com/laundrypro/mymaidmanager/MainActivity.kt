@@ -3,7 +3,7 @@ package com.laundrypro.mymaidmanager
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.activity.ComponentActivity // Using ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
@@ -16,8 +16,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -36,15 +38,18 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.fragment.app.FragmentActivity // Ensure this is present
-import androidx.fragment.app.FragmentManager // <-- Import FragmentManager
+import androidx.compose.ui.window.DialogProperties // Import for dialog properties
+// No longer need FragmentActivity or FragmentManager
+// import androidx.fragment.app.FragmentActivity
+// import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.google.android.material.datepicker.MaterialDatePicker
+// Remove MaterialDatePicker import
+// import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.gson.JsonParser
 // Adjust import path based on your package structure
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
@@ -69,7 +74,8 @@ sealed class Screen(val route: String) {
     }
 }
 
-class MainActivity : FragmentActivity() { // Changed to FragmentActivity
+// Inherit from ComponentActivity
+class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels {
         AuthViewModelFactory(application)
     }
@@ -79,19 +85,19 @@ class MainActivity : FragmentActivity() { // Changed to FragmentActivity
         setContent {
             MyMaidManagerTheme {
                 val navController = rememberNavController()
-                // --- Pass FragmentManager from the Activity ---
-                AppNavigator(navController, authViewModel, supportFragmentManager)
+                // --- No longer need to pass FragmentManager ---
+                AppNavigator(navController, authViewModel)
             }
         }
     }
 }
 
-// --- AppNavigator now accepts FragmentManager ---
+// --- AppNavigator no longer accepts FragmentManager ---
 @Composable
 fun AppNavigator(
     navController: NavHostController,
-    authViewModel: AuthViewModel,
-    fragmentManager: FragmentManager // <-- Accept FragmentManager
+    authViewModel: AuthViewModel
+    // fragmentManager: FragmentManager // Removed
 ) {
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
@@ -125,25 +131,22 @@ fun AppNavigator(
         composable(Screen.MaidDetail.route) { backStackEntry ->
             val maidId = backStackEntry.arguments?.getString("maidId")
             if (maidId != null) {
-                // --- Pass FragmentManager down ---
+                // --- No longer pass FragmentManager down ---
                 MaidDetailScreen(
                     maidId = maidId,
-                    fragmentManager = fragmentManager, // <-- Pass it here
+                    // fragmentManager = fragmentManager, // Removed
                     onNavigateUp = { navController.navigateUp() }
                 )
             } else {
-                // Fallback or error handling if maidId is unexpectedly null
                 LaunchedEffect(Unit) { navController.navigateUp() }
             }
         }
     }
 
     LaunchedEffect(authState) {
-        // Handle auto navigation on auth state changes
         if (authState is AuthState.Unauthenticated && navController.currentDestination?.route != Screen.Auth.route) {
             navController.navigate(Screen.Auth.route) { popUpTo(0) }
         }
-        // Navigate to main list if authenticated and still on loading screen
         if (authState is AuthState.Authenticated && navController.currentDestination?.route == "loading_screen") {
             navController.navigate(Screen.MainList.route) { popUpTo(0) }
         }
@@ -239,7 +242,7 @@ fun AddMaidDialog(
             elevation = CardDefaults.cardElevation(8.dp)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -306,12 +309,10 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
 }
 
 
-// --- MaidDetailScreen now accepts FragmentManager ---
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaidDetailScreen(
     maidId: String,
-    fragmentManager: FragmentManager, // <-- Accept FragmentManager
     onNavigateUp: () -> Unit
 ) {
     val viewModel: MaidViewModel = viewModel()
@@ -338,8 +339,7 @@ fun MaidDetailScreen(
                 is MaidDetailUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 is MaidDetailUIState.Success -> MaidDetailContent(
                     maid = state.maid,
-                    viewModel = viewModel,
-                    fragmentManager = fragmentManager // <-- Pass it down
+                    viewModel = viewModel
                 )
                 is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
             }
@@ -347,49 +347,37 @@ fun MaidDetailScreen(
     }
 }
 
-// --- MaidDetailContent now accepts FragmentManager ---
+@OptIn(ExperimentalMaterial3Api::class) // Needed for rememberDatePickerState
 @Composable
 fun MaidDetailContent(
     maid: Maid,
-    viewModel: MaidViewModel,
-    fragmentManager: FragmentManager // <-- Accept FragmentManager
+    viewModel: MaidViewModel
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
     var showManualAttendanceDialog by remember { mutableStateOf(false) }
-    val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
-    var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
-    val context = LocalContext.current // Keep context for Toasts
+    var showDatePickerDialog by remember { mutableStateOf(false) }
 
-    // --- Date Picker Launcher Function ---
-    // Now accepts FragmentManager explicitly
-    fun showDatePicker(fm: FragmentManager?, currentSelection: Long?, onDateSelected: (Long) -> Unit) {
-        Log.d(TAG, "showDatePicker function called")
-        if (fm == null) {
-            Log.e(TAG, "showDatePicker failed: FragmentManager provided is null!")
-            Toast.makeText(context, "Error: Cannot find activity's fragment manager.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val picker = MaterialDatePicker.Builder.datePicker()
-            .setTitleText("Select Date")
-            .setSelection(currentSelection ?: MaterialDatePicker.todayInUtcMilliseconds())
-            .build()
-        picker.addOnPositiveButtonClickListener {
-            Log.d(TAG, "Date selected: $it ms (UTC)")
-            onDateSelected(it)
-        }
-        try {
-            Log.d(TAG, "Attempting to show DatePicker using provided FragmentManager...")
-            picker.show(fm, picker.toString()) // Use the passed FragmentManager
-            Log.d(TAG, "DatePicker show() called successfully.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing DatePicker: ${e.message}", e)
-            Toast.makeText(context, "Could not display date picker: ${e.message}", Toast.LENGTH_LONG).show()
+    val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
+    val manualAttendanceState by viewModel.manualAttendanceState.collectAsStateWithLifecycle()
+    var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
+
+    val context = LocalContext.current
+
+    LaunchedEffect(key1 = maid.id) {
+        if (payrollState !is PayrollUIState.Success) {
+            viewModel.fetchPayroll(maid.id)
         }
     }
-    // --- End Date Picker Launcher ---
 
-    LaunchedEffect(key1 = maid.id) { viewModel.fetchPayroll(maid.id) }
+    LaunchedEffect(manualAttendanceState) {
+        if (manualAttendanceState is ManualAttendanceState.Success) {
+            Toast.makeText(context, "Absence Recorded", Toast.LENGTH_SHORT).show()
+            showManualAttendanceDialog = false
+            selectedDateMillis = null
+            viewModel.resetManualAttendanceState()
+        }
+    }
 
     if (showAddTaskDialog) {
         AddTaskDialog(
@@ -400,7 +388,6 @@ fun MaidDetailContent(
             }
         )
     }
-
     showAttendanceDialog?.let { task ->
         AttendanceOtpDialog(
             maidName = maid.name ?: "Maid",
@@ -415,34 +402,44 @@ fun MaidDetailContent(
         )
     }
 
-    Log.d(TAG, "showManualAttendanceDialog state: $showManualAttendanceDialog")
+    if (showDatePickerDialog) {
+        CustomDatePickerDialog(
+            initialSelectedDateMillis = selectedDateMillis ?: System.currentTimeMillis(),
+            onDismissRequest = {
+                showDatePickerDialog = false
+                showManualAttendanceDialog = true // Re-open Manual Dialog
+            },
+            onDateSelected = { newDateMillis ->
+                selectedDateMillis = newDateMillis
+                Log.d(TAG, "Custom DatePicker Confirmed: ${selectedDateMillis}ms UTC")
+                showDatePickerDialog = false
+                showManualAttendanceDialog = true // Re-open Manual Dialog
+            }
+        )
+    }
+
     if (showManualAttendanceDialog) {
         Log.d(TAG, "Rendering ManualAttendanceDialog")
         ManualAttendanceDialog(
             tasks = maid.tasks ?: emptyList(),
             selectedDateMillis = selectedDateMillis,
-            fragmentManager = fragmentManager, // <-- Pass FragmentManager down
+            manualAttendanceState = manualAttendanceState,
             onDismiss = {
                 Log.d(TAG, "ManualAttendanceDialog dismissed")
                 showManualAttendanceDialog = false
                 selectedDateMillis = null
+                viewModel.resetManualAttendanceState()
             },
             onConfirm = { date, taskName, status ->
                 Log.d(TAG, "ManualAttendanceDialog confirmed: Date=$date, Task=$taskName, Status=$status")
                 viewModel.addManualAttendance(maid.id, date, taskName, status)
-                showManualAttendanceDialog = false
-                selectedDateMillis = null
             },
-            // Pass a lambda that calls showDatePicker, providing the fragmentManager AND the update logic
-            onSelectDateClicked = { fm -> // Lambda accepts FragmentManager?
-                Log.d(TAG, "onSelectDateClicked callback received")
-                showDatePicker(fm, selectedDateMillis) { newDateMillis ->
-                    selectedDateMillis = newDateMillis // Update state here
-                }
+            onSelectDateClicked = {
+                Log.d(TAG, "onSelectDateClicked callback received, swapping dialogs")
+                showManualAttendanceDialog = false // Hide this dialog
+                showDatePickerDialog = true // Show the date picker
             }
         )
-    } else {
-        Log.d(TAG, "ManualAttendanceDialog should NOT be rendered")
     }
 
     LazyColumn(
@@ -469,13 +466,167 @@ fun MaidDetailContent(
                 },
                 onMarkAbsent = {
                     Log.d(TAG, "Mark Absent Button Clicked - Setting showManualAttendanceDialog to true")
-                    selectedDateMillis = MaterialDatePicker.todayInUtcMilliseconds()
+                    selectedDateMillis = System.currentTimeMillis()
                     showManualAttendanceDialog = true
                 }
             )
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomDatePickerDialog(
+    initialSelectedDateMillis: Long,
+    onDismissRequest: () -> Unit,
+    onDateSelected: (Long?) -> Unit
+) {
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis
+    )
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier
+                    .wrapContentHeight()
+                    .widthIn(max = 360.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    DatePicker(state = datePickerState)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismissRequest) { Text("Cancel") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
+                                onDateSelected(datePickerState.selectedDateMillis)
+                            }
+                        ) { Text("OK") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManualAttendanceDialog(
+    tasks: List<Task>,
+    selectedDateMillis: Long?,
+    manualAttendanceState: ManualAttendanceState,
+    onDismiss: () -> Unit,
+    onConfirm: (date: String, taskName: String, status: String) -> Unit,
+    onSelectDateClicked: () -> Unit
+) {
+    Log.d(TAG, "Inside ManualAttendanceDialog composable")
+    var selectedTask by remember { mutableStateOf<Task?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    val isLoading = manualAttendanceState is ManualAttendanceState.Loading
+
+    val formattedDate = remember(selectedDateMillis) {
+        selectedDateMillis?.let {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.format(Date(it))
+        } ?: ""
+    }
+
+    Dialog(onDismissRequest = { if (!isLoading) onDismiss() }) {
+        Card(shape = RoundedCornerShape(16.dp)) {
+            Column(
+                modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Mark Attendance Manually", style = MaterialTheme.typography.headlineSmall)
+
+                Button(onClick = onSelectDateClicked, enabled = !isLoading) {
+                    Text(if (formattedDate.isNotEmpty()) "Date: $formattedDate" else "Select Date")
+                }
+
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { if (!isLoading) expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedTask?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Select Task") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        enabled = !isLoading
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        tasks.forEach { task ->
+                            DropdownMenuItem(
+                                text = { Text(task.name ?: "") },
+                                onClick = {
+                                    selectedTask = task
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                val status = "Absent"
+                Text("Status: $status", style = MaterialTheme.typography.bodyLarge)
+
+                if (manualAttendanceState is ManualAttendanceState.Error) {
+                    Text(
+                        text = manualAttendanceState.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (formattedDate.isNotEmpty() && selectedTask != null) {
+                                onConfirm(formattedDate, selectedTask!!.name ?: "", status)
+                            }
+                        },
+                        enabled = formattedDate.isNotEmpty() && selectedTask != null && !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Confirm Absent")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun MaidInfoSection(maid: Maid) {
@@ -620,27 +771,20 @@ fun AttendanceItem(record: AttendanceRecord) {
     val formattedDate = remember(record.date) {
         try {
             val dateString = record.date ?: return@remember "Invalid Date"
-            // More robust date parsing for different possible formats from MongoDB ISODate
             val pattern1 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
             val pattern2 = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-            val parser = try {
-                SimpleDateFormat(pattern1, Locale.getDefault())
-            } catch (e: IllegalArgumentException) {
-                SimpleDateFormat(pattern2, Locale.getDefault())
-            }
+            val parser = try { SimpleDateFormat(pattern1, Locale.getDefault()) } catch (e: IllegalArgumentException) { SimpleDateFormat(pattern2, Locale.getDefault()) }
             parser.timeZone = TimeZone.getTimeZone("UTC") // Input date is UTC
             val date = parser.parse(dateString)
-            // Format for display in local time zone
             date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: dateString
         } catch (e: Exception) {
             Log.e(TAG, "Date parsing error for '${record.date}': ${e.message}")
-            record.date ?: "Invalid Date" // Fallback
+            record.date ?: "Invalid Date"
         }
     }
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(formattedDate, modifier = Modifier.weight(1f))
         Text(record.taskName ?: "", fontWeight = FontWeight.Bold)
-        // Show status if it's not 'Present'
         if(record.status != "Present") {
             Text(" (${record.status ?: ""})", modifier = Modifier.padding(start = 4.dp), color = MaterialTheme.colorScheme.error)
         }
@@ -659,7 +803,7 @@ fun AddTaskDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp)) {
-            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Add New Task", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
                 OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
@@ -675,104 +819,6 @@ fun AddTaskDialog(
     }
 }
 
-// --- ManualAttendanceDialog now accepts FragmentManager ---
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ManualAttendanceDialog(
-    tasks: List<Task>,
-    selectedDateMillis: Long?,
-    fragmentManager: FragmentManager?, // <-- Accept FragmentManager
-    onDismiss: () -> Unit,
-    onConfirm: (date: String, taskName: String, status: String) -> Unit,
-    // --- Callback now accepts FragmentManager? ---
-    onSelectDateClicked: (FragmentManager?) -> Unit
-) {
-    Log.d(TAG, "Inside ManualAttendanceDialog composable")
-    var selectedTask by remember { mutableStateOf<Task?>(null) }
-    var expanded by remember { mutableStateOf(false) }
-    // No need to get context here anymore for the picker
-
-    val formattedDate = remember(selectedDateMillis) {
-        selectedDateMillis?.let {
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            sdf.timeZone = TimeZone.getTimeZone("UTC") // Ensure we format the UTC date
-            sdf.format(Date(it))
-        } ?: ""
-    }
-    Log.d(TAG, "ManualAttendanceDialog received Formatted Date: $formattedDate")
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(shape = RoundedCornerShape(16.dp)) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text("Mark Attendance Manually", style = MaterialTheme.typography.headlineSmall)
-
-                // --- Button onClick calls callback, passing the FragmentManager it received ---
-                Button(onClick = {
-                    Log.d(TAG, "'Select Date' Button clicked inside Dialog, calling onSelectDateClicked callback with FragmentManager")
-                    onSelectDateClicked(fragmentManager) // Pass the FragmentManager
-                }) {
-                    Text(if (formattedDate.isNotEmpty()) "Date: $formattedDate" else "Select Date")
-                }
-
-                // Task Selection Dropdown
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
-                ) {
-                    OutlinedTextField(
-                        value = selectedTask?.name ?: "",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Select Task") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        tasks.forEach { task ->
-                            DropdownMenuItem(
-                                text = { Text(task.name ?: "") },
-                                onClick = {
-                                    selectedTask = task
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                val status = "Absent"
-                Text("Status: $status", style = MaterialTheme.typography.bodyLarge)
-
-                // Action Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Button(
-                        onClick = {
-                            Log.d(TAG, "'Confirm Absent' button clicked")
-                            if (formattedDate.isNotEmpty() && selectedTask != null) {
-                                onConfirm(formattedDate, selectedTask!!.name ?: "", status)
-                            } else {
-                                Log.w(TAG, "Confirm button clicked but date or task missing!")
-                            }
-                        },
-                        enabled = formattedDate.isNotEmpty() && selectedTask != null
-                    ) { Text("Confirm Absent") }
-                }
-            }
-        }
-    }
-}
-
-
 @Composable
 fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     var showLogin by rememberSaveable { mutableStateOf(true) }
@@ -785,14 +831,13 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
             val displayMessage = try {
                 JsonParser().parse(errorJsonString).asJsonObject.get("msg").asString
             } catch (e: Exception) {
-                errorJsonString // Fallback to raw message if parsing fails
+                errorJsonString
             }
             Toast.makeText(context, displayMessage, Toast.LENGTH_LONG).show()
             viewModel.resetAuthResult()
         }
     }
 
-    // Navigate when authenticated
     LaunchedEffect(viewModel.authState.collectAsStateWithLifecycle().value) {
         if (viewModel.authState.value is AuthState.Authenticated) {
             onLoginSuccess()
@@ -878,7 +923,7 @@ fun LoginForm(
     val isLoading = authResult is AuthResult.Loading
 
     Column(
-        modifier = Modifier.padding(24.dp),
+        modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -951,7 +996,7 @@ fun SignUpForm(
     val passwordsMatch = remember(password, confirmPassword) { password == confirmPassword }
 
     Column(
-        modifier = Modifier.padding(24.dp),
+        modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -1063,10 +1108,8 @@ fun AttendanceOtpDialog(
         if (otpState is OtpState.OtpRequested) {
             Toast.makeText(context, "OTP has been sent to the maid's mobile.", Toast.LENGTH_LONG).show()
         }
-        // Check if the verification was successful and reset
         if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
-            // A simple way to check if the state *just* became idle after loading/error
-            if (otpValue.isNotEmpty()){ // Check if OTP was attempted
+            if (otpValue.isNotEmpty()){
                 Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
                 onDismiss()
             }

@@ -2,6 +2,8 @@ package com.laundrypro.mymaidmanager.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.JsonParser
+// Adjust import path to 'models'
 import com.laundrypro.mymaidmanager.models.*
 import com.laundrypro.mymaidmanager.network.RetrofitClient
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,31 +11,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+// --- Maid Management Section ---
 sealed class MaidListUIState {
-    data object Loading : MaidListUIState()
+    object Loading : MaidListUIState()
     data class Success(val maids: List<Maid>) : MaidListUIState()
     data class Error(val message: String) : MaidListUIState()
 }
-
 sealed class MaidDetailUIState {
-    data object Loading : MaidDetailUIState()
+    object Loading : MaidDetailUIState()
     data class Success(val maid: Maid) : MaidDetailUIState()
     data class Error(val message: String) : MaidDetailUIState()
 }
-
 sealed class OtpState {
-    data object Idle : OtpState()
-    data object OtpRequested : OtpState()
-    data object Loading : OtpState()
+    object Idle : OtpState()
+    object OtpRequested : OtpState()
+    object Loading : OtpState()
     data class Error(val message: String) : OtpState()
 }
-
 sealed class PayrollUIState {
-    data object Loading : PayrollUIState()
+    object Loading : PayrollUIState()
     data class Success(val payroll: PayrollResponse) : PayrollUIState()
     data class Error(val message: String) : PayrollUIState()
 }
+sealed class ManualAttendanceState {
+    object Idle : ManualAttendanceState()
+    object Loading : ManualAttendanceState()
+    object Success : ManualAttendanceState()
+    data class Error(val message: String) : ManualAttendanceState()
+}
 
+
+// --- MaidViewModel ---
 class MaidViewModel : ViewModel() {
     private val _maidListUIState = MutableStateFlow<MaidListUIState>(MaidListUIState.Loading)
     val maidListUIState: StateFlow<MaidListUIState> = _maidListUIState.asStateFlow()
@@ -47,11 +55,17 @@ class MaidViewModel : ViewModel() {
     private val _payrollUIState = MutableStateFlow<PayrollUIState>(PayrollUIState.Loading)
     val payrollUIState: StateFlow<PayrollUIState> = _payrollUIState.asStateFlow()
 
+    private val _manualAttendanceState = MutableStateFlow<ManualAttendanceState>(ManualAttendanceState.Idle)
+    val manualAttendanceState: StateFlow<ManualAttendanceState> = _manualAttendanceState.asStateFlow()
+
     private val apiService = RetrofitClient.apiService
 
     fun fetchMaids() {
         viewModelScope.launch {
-            _maidListUIState.value = MaidListUIState.Loading
+            // Only show full loading on initial load or retry from error
+            if (_maidListUIState.value !is MaidListUIState.Success) {
+                _maidListUIState.value = MaidListUIState.Loading
+            }
             try {
                 val response = apiService.getMaids()
                 if (response.isSuccessful && response.body() != null) {
@@ -65,16 +79,13 @@ class MaidViewModel : ViewModel() {
         }
     }
 
-    // --- THIS FUNCTION IS UPDATED ---
     fun addMaid(name: String, mobile: String, address: String) {
         viewModelScope.launch {
             try {
                 val response = apiService.addMaid(AddMaidRequest(name, mobile, address))
                 if (response.isSuccessful) {
-                    // THE FIX: After a successful add, refresh the list.
-                    fetchMaids()
+                    fetchMaids() // Refresh the list
                 } else {
-                    // Optionally, handle the error case, e.g., show a toast
                     _maidListUIState.value = MaidListUIState.Error("Failed to add maid. Please try again.")
                 }
             } catch (e: Exception) {
@@ -85,7 +96,10 @@ class MaidViewModel : ViewModel() {
 
     fun fetchMaidDetails(maidId: String) {
         viewModelScope.launch {
-            _maidDetailUIState.value = MaidDetailUIState.Loading
+            // Only show full loading on initial load or retry from error
+            if (_maidDetailUIState.value !is MaidDetailUIState.Success) {
+                _maidDetailUIState.value = MaidDetailUIState.Loading
+            }
             try {
                 val response = apiService.getMaidDetails(maidId)
                 if (response.isSuccessful && response.body() != null) {
@@ -103,7 +117,7 @@ class MaidViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.addTask(maidId, AddTaskRequest(name, price, frequency))
-                fetchMaidDetails(maidId)
+                fetchMaidDetails(maidId) // Refresh details
             } catch (e: Exception) {
                 // You can add error handling for the detail screen here
             }
@@ -114,7 +128,7 @@ class MaidViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.deleteTask(maidId, taskId)
-                fetchMaidDetails(maidId)
+                fetchMaidDetails(maidId) // Refresh details
             } catch (e: Exception) {
                 // You can add error handling for the detail screen here
             }
@@ -123,7 +137,10 @@ class MaidViewModel : ViewModel() {
 
     fun fetchPayroll(maidId: String) {
         viewModelScope.launch {
-            _payrollUIState.value = PayrollUIState.Loading
+            // Only show full loading on initial load or retry from error
+            if (_payrollUIState.value !is PayrollUIState.Success) {
+                _payrollUIState.value = PayrollUIState.Loading
+            }
             try {
                 val response = apiService.getPayroll(maidId)
                 if (response.isSuccessful && response.body() != null) {
@@ -135,6 +152,34 @@ class MaidViewModel : ViewModel() {
                 _payrollUIState.value = PayrollUIState.Error(e.message ?: "An error occurred")
             }
         }
+    }
+
+    fun addManualAttendance(maidId: String, date: String, taskName: String, status: String) {
+        viewModelScope.launch {
+            _manualAttendanceState.value = ManualAttendanceState.Loading // Set loading state
+            try {
+                val response = apiService.addManualAttendance(maidId, AddManualAttendanceRequest(date, taskName, status))
+                if (response.isSuccessful) {
+                    // Refresh data in the background (this will no longer cause a flicker)
+                    fetchMaidDetails(maidId)
+                    fetchPayroll(maidId)
+                    _manualAttendanceState.value = ManualAttendanceState.Success // Set success state
+                } else {
+                    val errorMsg = response.errorBody()?.string()?.let {
+                        try {
+                            JsonParser().parse(it).asJsonObject.get("msg").asString
+                        } catch (e: Exception) { "Failed to add record" }
+                    } ?: "Failed to add record"
+                    _manualAttendanceState.value = ManualAttendanceState.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                _manualAttendanceState.value = ManualAttendanceState.Error(e.message ?: "An error occurred")
+            }
+        }
+    }
+
+    fun resetManualAttendanceState() {
+        _manualAttendanceState.value = ManualAttendanceState.Idle
     }
 
     fun requestOtpForAttendance(maidId: String) {
@@ -160,10 +205,12 @@ class MaidViewModel : ViewModel() {
                 val response = apiService.verifyOtp(maidId, VerifyOtpRequest(otp, taskName))
                 if (response.isSuccessful) {
                     _otpState.value = OtpState.Idle
-                    fetchMaidDetails(maidId)
+                    fetchMaidDetails(maidId) // Refresh details
                 } else {
                     val errorMsg = response.errorBody()?.string()?.let {
-                        com.google.gson.JsonParser().parse(it).asJsonObject.get("msg").asString
+                        try {
+                            JsonParser().parse(it).asJsonObject.get("msg").asString
+                        } catch (e: Exception) { "Invalid OTP" }
                     } ?: "Invalid OTP"
                     _otpState.value = OtpState.Error(errorMsg)
                 }
@@ -175,24 +222,5 @@ class MaidViewModel : ViewModel() {
 
     fun resetOtpState() {
         _otpState.value = OtpState.Idle
-    }
-
-    fun addManualAttendance(maidId: String, date: String, taskName: String, status: String) {
-        viewModelScope.launch {
-            // Optionally add a loading state specific to this action if needed
-            try {
-                val response = apiService.addManualAttendance(maidId, AddManualAttendanceRequest(date, taskName, status))
-                if (response.isSuccessful) {
-                    // Refresh details after successfully adding the record
-                    fetchMaidDetails(maidId)
-                    fetchPayroll(maidId) // Also refresh payroll
-                } else {
-                    // Handle error state if needed (e.g., show a toast)
-                    _maidDetailUIState.value = MaidDetailUIState.Error("Failed to add manual attendance record")
-                }
-            } catch (e: Exception) {
-                _maidDetailUIState.value = MaidDetailUIState.Error(e.message ?: "An error occurred")
-            }
-        }
     }
 }
