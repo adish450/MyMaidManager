@@ -301,13 +301,32 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        shape = RoundedCornerShape(8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp), // Reduced elevation
+        shape = RoundedCornerShape(8.dp), // Less rounded corners
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface) // Standard surface color
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(maid.name ?: "", style = MaterialTheme.typography.titleMedium)
-            Text(maid.mobile ?: "", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            Text(maid.address ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = "Maid Icon",
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(8.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Name: ${maid.name ?: ""}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Mobile: ${maid.mobile ?: ""}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                Text("Address: ${maid.address ?: ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            }
         }
     }
 }
@@ -1822,6 +1841,7 @@ fun AttendanceHistoryScreen(
                     // 5. Define custom colors for the calendar cells - **FIXED**
                     val datePickerColors = DatePickerDefaults.colors(
                         // --- Removed faulty parameters ---
+                        // We will use the default theme colors
                     )
 
                     Column(
@@ -1842,7 +1862,20 @@ fun AttendanceHistoryScreen(
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
-                        Divider(modifier = Modifier.padding(horizontal = 16.dp)) // Add padding here
+
+                        // 7. Add a simple legend - **NOTE: This legend won't match the calendar above**
+                        // We will keep it simple for now as we can't color the dates
+                        Text(
+                            "Select a date to view attendance records.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp), // Add padding here
+                            thickness = 1.dp // --- Make divider thinner ---
+                        )
                         Spacer(modifier = Modifier.height(16.dp))
 
                         // 8. Show records for the selected date
