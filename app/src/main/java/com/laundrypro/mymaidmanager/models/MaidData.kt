@@ -15,7 +15,7 @@ data class Maid(
 
 data class Task(
     @SerializedName("_id")
-    val id: String,
+    val id: String?,
     val name: String,
     val price: Double,
     val frequency: String

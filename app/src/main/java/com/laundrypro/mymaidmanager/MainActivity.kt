@@ -436,6 +436,7 @@ fun MaidDetailContent(
         EditTaskDialog(
             task = task,
             onDismiss = { showEditTaskDialog = null },
+            // --- FIX: Pass task.id (which is nullable) ---
             onEditTask = { taskId, name, price, freq ->
                 viewModel.updateTask(maid.id, taskId, name, price, freq)
                 showEditTaskDialog = null
@@ -509,6 +510,7 @@ fun MaidDetailContent(
                 tasks = maid.tasks ?: emptyList(),
                 onAddTask = { showAddTaskDialog = true },
                 onEditTask = { task -> showEditTaskDialog = task },
+                // --- FIX: Pass task.id (which is nullable) ---
                 onDeleteTask = { taskId -> viewModel.deleteTask(maid.id, taskId) }
             )
         }
@@ -842,13 +844,14 @@ fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTo
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksSection(
     tasks: List<Task>,
     onAddTask: () -> Unit,
-    // --- NEW: Add onEditTask parameter ---
+    // --- FIX: Change lambda to accept nullable String ---
     onEditTask: (Task) -> Unit,
-    onDeleteTask: (String) -> Unit
+    onDeleteTask: (String?) -> Unit
 ) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -859,11 +862,11 @@ fun TasksSection(
         if (tasks.isEmpty()) {
             Text("No tasks assigned.")
         } else {
-            // --- NEW: Pass onEdit handler to TaskItem ---
             tasks.forEach { task ->
                 TaskItem(
                     task = task,
                     onEdit = { onEditTask(task) },
+                    // --- FIX: Pass task.id (which is nullable) ---
                     onDelete = { onDeleteTask(task.id) }
                 )
             }
@@ -874,7 +877,6 @@ fun TasksSection(
 @Composable
 fun TaskItem(
     task: Task,
-    // --- NEW: Add onEdit parameter ---
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -883,7 +885,6 @@ fun TaskItem(
             Text(task.name ?: "", fontWeight = FontWeight.Bold)
             Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
         }
-        // --- NEW: Edit Button ---
         IconButton(onClick = onEdit) {
             Icon(Icons.Default.Edit, "Edit Task")
         }
@@ -966,6 +967,7 @@ fun AttendanceItem(record: AttendanceRecord) {
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
@@ -973,7 +975,12 @@ fun AddTaskDialog(
 ) {
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
-    var frequency by remember { mutableStateOf("") }
+
+    // --- FIX: Change frequency to be a dropdown ---
+    val frequencyOptions = listOf("Daily", "Weekly", "Bi-weekly", "Alternate Days", "Monthly")
+    var frequency by remember { mutableStateOf(frequencyOptions[0]) } // Default to "Daily"
+    var expanded by remember { mutableStateOf(false) }
+    // --- END FIX ---
 
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp)) {
@@ -981,7 +988,37 @@ fun AddTaskDialog(
                 Text("Add New Task", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
                 OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") }, singleLine = true)
+
+                // --- FIX: Use ExposedDropdownMenuBox for Frequency ---
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = frequency,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Frequency") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        frequencyOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    frequency = option
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                // --- END FIX ---
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
@@ -994,15 +1031,22 @@ fun AddTaskDialog(
 }
 
 // --- NEW DIALOG: EditTaskDialog ---
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTaskDialog(
     task: Task,
     onDismiss: () -> Unit,
-    onEditTask: (taskId: String, name: String, price: Double, frequency: String) -> Unit
+    // --- FIX: Change taskId to be nullable ---
+    onEditTask: (taskId: String?, name: String, price: Double, frequency: String) -> Unit
 ) {
     var name by remember { mutableStateOf(task.name ?: "") }
     var price by remember { mutableStateOf(task.price.toString()) }
-    var frequency by remember { mutableStateOf(task.frequency ?: "") }
+
+    // --- FIX: Change frequency to be a dropdown ---
+    val frequencyOptions = listOf("Daily", "Weekly", "Bi-weekly", "Alternate Days", "Monthly")
+    var frequency by remember { mutableStateOf(task.frequency ?: frequencyOptions[0]) } // Default to task's frequency or "Daily"
+    var expanded by remember { mutableStateOf(false) }
+    // --- END FIX ---
 
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp)) {
@@ -1010,10 +1054,41 @@ fun EditTaskDialog(
                 Text("Edit Task", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
                 OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") }, singleLine = true)
+
+                // --- FIX: Use ExposedDropdownMenuBox for Frequency ---
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = frequency,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Frequency") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        frequencyOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    frequency = option
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                // --- END FIX ---
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
+                        // --- FIX: Pass task.id (which is nullable) ---
                         onEditTask(task.id, name, price.toDoubleOrNull() ?: 0.0, frequency)
                     }) { Text("Update Task") }
                 }
