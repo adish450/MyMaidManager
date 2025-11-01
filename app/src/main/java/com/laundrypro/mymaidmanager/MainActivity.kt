@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +35,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +70,10 @@ sealed class Screen(val route: String) {
     object MainList : Screen("main_list_screen")
     object MaidDetail : Screen("maid_detail_screen/{maidId}") {
         fun createRoute(maidId: String) = "maid_detail_screen/$maidId"
+    }
+    // --- NEW SCREEN ---
+    object AttendanceHistory : Screen("attendance_history_screen/{maidId}") {
+        fun createRoute(maidId: String) = "attendance_history_screen/$maidId"
     }
 }
 
@@ -138,7 +144,24 @@ fun AppNavigator(
                     },
                     onMaidDeleted = {
                         navController.popBackStack() // Go back to the main list
+                    },
+                    // --- NEW: Add navigation to history screen ---
+                    onNavigateToHistory = {
+                        navController.navigate(Screen.AttendanceHistory.createRoute(maidId))
                     }
+                )
+            } else {
+                LaunchedEffect(Unit) { navController.navigateUp() }
+            }
+        }
+        // --- NEW: Add composable for the history screen ---
+        composable(Screen.AttendanceHistory.route) { backStackEntry ->
+            val maidId = backStackEntry.arguments?.getString("maidId")
+            if (maidId != null) {
+                AttendanceHistoryScreen(
+                    maidViewModel = maidViewModel,
+                    maidId = maidId,
+                    onNavigateUp = { navController.navigateUp() }
                 )
             } else {
                 LaunchedEffect(Unit) { navController.navigateUp() }
@@ -297,7 +320,8 @@ fun MaidDetailScreen(
     maidViewModel: MaidViewModel,
     maidId: String,
     onNavigateUp: () -> Unit,
-    onMaidDeleted: () -> Unit
+    onMaidDeleted: () -> Unit,
+    onNavigateToHistory: () -> Unit // --- NEW: Navigation callback ---
 ) {
     // --- FIX: Use the passed-in ViewModel ---
     // val viewModel: MaidViewModel = viewModel() // <-- This was the bug
@@ -378,7 +402,8 @@ fun MaidDetailScreen(
 
                     MaidDetailContent(
                         maid = state.maid,
-                        viewModel = maidViewModel // Pass the shared ViewModel
+                        viewModel = maidViewModel, // Pass the shared ViewModel
+                        onNavigateToHistory = onNavigateToHistory // --- NEW: Pass navigation callback ---
                     )
                 }
                 is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
@@ -391,7 +416,8 @@ fun MaidDetailScreen(
 @Composable
 fun MaidDetailContent(
     maid: Maid,
-    viewModel: MaidViewModel // <-- Accept the shared ViewModel
+    viewModel: MaidViewModel, // <-- Accept the shared ViewModel
+    onNavigateToHistory: () -> Unit // --- NEW: Navigation callback ---
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showEditTaskDialog by remember { mutableStateOf<Task?>(null) }
@@ -552,7 +578,8 @@ fun MaidDetailContent(
                     Log.d(TAG, "Manually Mark Present Button Clicked - Setting showManualAttendanceDialog to true")
                     selectedDateMillis = System.currentTimeMillis()
                     showManualAttendanceDialog = true
-                }
+                },
+                onViewHistory = onNavigateToHistory // --- NEW: Pass navigation ---
             )
         }
     }
@@ -989,7 +1016,8 @@ fun AttendanceSection(
     attendance: List<AttendanceRecord>,
     tasks: List<Task>,
     onMarkAttendance: () -> Unit, // --- UPDATED SIGNATURE ---
-    onMarkPresentManually: () -> Unit
+    onMarkPresentManually: () -> Unit,
+    onViewHistory: () -> Unit // --- NEW: Navigation callback ---
 ) {
     Column {
         Text("Attendance", style = MaterialTheme.typography.headlineSmall)
@@ -1011,7 +1039,18 @@ fun AttendanceSection(
         }
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text("History (Last 5)", style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("History (Last 5)", style = MaterialTheme.typography.titleMedium)
+            // --- NEW: View All Button ---
+            TextButton(onClick = onViewHistory) {
+                Text("View Full History")
+                Icon(Icons.Default.ChevronRight, contentDescription = null)
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
         if (attendance.isEmpty()) {
             Text("No attendance records yet.")
@@ -1636,6 +1675,206 @@ fun AttendanceOtpDialog(
                             enabled = otpValue.length == 6
                         ) {
                             Text("Verify")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- NEW SCREEN ---
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AttendanceHistoryScreen(
+    maidViewModel: MaidViewModel,
+    maidId: String,
+    onNavigateUp: () -> Unit
+) {
+    val uiState by maidViewModel.maidDetailUIState.collectAsStateWithLifecycle()
+
+    // Fetch details if not already loaded (e.g., if process was restored)
+    LaunchedEffect(maidId) {
+        if (maidViewModel.maidDetailUIState.value !is MaidDetailUIState.Success) {
+            maidViewModel.fetchMaidDetails(maidId)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Attendance History") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateUp) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+            when (val state = uiState) {
+                is MaidDetailUIState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
+                is MaidDetailUIState.Success -> {
+
+                    // --- REIMPLEMENTATION ---
+
+                    // --- ADD selectableDates logic ---
+                    val selectableDates = remember {
+                        val localTimeZone = TimeZone.getDefault()
+
+                        // Get today's date details in the local time zone
+                        val localToday = Calendar.getInstance(localTimeZone).apply {
+                            timeInMillis = System.currentTimeMillis()
+                        }
+                        val todayYear = localToday.get(Calendar.YEAR)
+                        val todayDayOfYear = localToday.get(Calendar.DAY_OF_YEAR)
+
+                        object : SelectableDates {
+                            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                                // Convert the calendar's UTC date to the local time zone for comparison
+                                val givenCal = Calendar.getInstance(localTimeZone).apply {
+                                    timeInMillis = utcTimeMillis
+                                }
+                                val givenYear = givenCal.get(Calendar.YEAR)
+                                val givenDayOfYear = givenCal.get(Calendar.DAY_OF_YEAR)
+
+                                // If the year is in the past, it's selectable
+                                if (givenYear < todayYear) return true
+                                // If the year is in the future, it's not
+                                if (givenYear > todayYear) return false
+
+                                // If it's the same year, check if the day is today or in the past
+                                return givenDayOfYear <= todayDayOfYear
+                            }
+                        }
+                    }
+                    // --- END ADD ---
+
+                    // 1. Remember the DatePicker state
+                    val datePickerState = rememberDatePickerState(
+                        initialSelectedDateMillis = System.currentTimeMillis(), // Start on today
+                        selectableDates = selectableDates // --- ADDED ---
+                    )
+
+                    // 2. Helper function to normalize a millisecond timestamp to the start of the day in UTC
+                    val normalizeDateToUtc = { millis: Long ->
+                        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                        cal.timeInMillis = millis
+                        cal.set(Calendar.HOUR_OF_DAY, 0)
+                        cal.set(Calendar.MINUTE, 0)
+                        cal.set(Calendar.SECOND, 0)
+                        cal.set(Calendar.MILLISECOND, 0)
+                        cal.timeInMillis
+                    }
+
+                    // 3. Create a set of "Present" dates, normalized to the start of the day in UTC
+                    // --- This is not used for coloring, but could be used for a legend ---
+                    val presentDatesUtc = remember(state.maid.attendance) {
+                        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
+                        val sdfWithMillis = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
+
+                        state.maid.attendance
+                            .filter { it.status == "Present" }
+                            .mapNotNull { record ->
+                                // Try parsing both date formats
+                                val date = try {
+                                    sdf.parse(record.date)
+                                } catch (e: Exception) {
+                                    try {
+                                        sdfWithMillis.parse(record.date)
+                                    } catch (e2: Exception) {
+                                        null
+                                    }
+                                }
+                                // Normalize to start of day in UTC
+                                date?.let { normalizeDateToUtc(it.time) }
+                            }
+                            .toSet()
+                    }
+
+                    // 4. Create a list of attendance records for the *selected* date
+                    val selectedDateRecords = remember(datePickerState.selectedDateMillis, state.maid.attendance) {
+                        val selectedUtc = datePickerState.selectedDateMillis?.let { normalizeDateToUtc(it) } ?: normalizeDateToUtc(System.currentTimeMillis())
+
+                        state.maid.attendance.filter { record ->
+                            val recordDate = try {
+                                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).apply {
+                                    timeZone = TimeZone.getTimeZone("UTC")
+                                }
+                                val sdfWithMillis = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).apply {
+                                    timeZone = TimeZone.getTimeZone("UTC")
+                                }
+                                val date = try { sdf.parse(record.date) } catch (e: Exception) { sdfWithMillis.parse(record.date) }
+                                date?.let { normalizeDateToUtc(it.time) }
+                            } catch (e: Exception) {
+                                null
+                            }
+                            recordDate == selectedUtc
+                        }
+                    }
+
+                    // 5. Define custom colors for the calendar cells - **FIXED**
+                    val datePickerColors = DatePickerDefaults.colors(
+                        // --- Removed faulty parameters ---
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize(),
+                        // --- REMOVED faulty padding ---
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // 6. Create the DatePicker (not StaticDatePicker) - **FIXED**
+                        DatePicker(
+                            state = datePickerState,
+                            colors = datePickerColors,
+                            title = null, // No title
+                            headline = null, // No headline
+                            showModeToggle = false, // Hide toggle
+                            modifier = Modifier.padding(top = 16.dp) // Add padding here
+                            // --- We cannot customize individual cells here, so dayContent is removed ---
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Divider(modifier = Modifier.padding(horizontal = 16.dp)) // Add padding here
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 8. Show records for the selected date
+                        val selectedDateFormatted = remember(datePickerState.selectedDateMillis) {
+                            val sdf = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault())
+                            val cal = Calendar.getInstance().apply {
+                                timeInMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                            }
+                            sdf.format(cal.time)
+                        }
+
+                        Text(
+                            "Records for $selectedDateFormatted",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (selectedDateRecords.isEmpty()) {
+                            Text(
+                                "No attendance recorded for this day.",
+                                modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(horizontal = 16.dp) // Add padding here
+                            ) {
+                                items(selectedDateRecords) { record ->
+                                    AttendanceItem(record)
+                                }
+                            }
                         }
                     }
                 }
