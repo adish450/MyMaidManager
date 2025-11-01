@@ -15,7 +15,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -393,7 +396,11 @@ fun MaidDetailContent(
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showEditTaskDialog by remember { mutableStateOf<Task?>(null) }
 
-    var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
+    // --- DIALOG STATE CHANGES ---
+    var showOtpTaskSelectionDialog by remember { mutableStateOf(false) } // New dialog
+    var showAttendanceDialog by remember { mutableStateOf<Task?>(null) } // This now holds the *selected* task for OTP
+    // --- END DIALOG STATE CHANGES ---
+
     var showManualAttendanceDialog by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
 
@@ -447,6 +454,21 @@ fun MaidDetailContent(
             }
         )
     }
+
+    // --- NEW: Show the OTP Task Selection Dialog ---
+    if (showOtpTaskSelectionDialog) {
+        OtpTaskSelectionDialog(
+            tasks = maid.tasks ?: emptyList(),
+            onDismiss = { showOtpTaskSelectionDialog = false },
+            onTaskSelected = { task ->
+                showOtpTaskSelectionDialog = false
+                // Now trigger the original OTP flow
+                viewModel.requestOtpForAttendance(maid.id)
+                showAttendanceDialog = task
+            }
+        )
+    }
+    // --- END NEW DIALOG ---
 
     showAttendanceDialog?.let { task ->
         AttendanceOtpDialog(
@@ -522,9 +544,9 @@ fun MaidDetailContent(
             AttendanceSection(
                 attendance = maid.attendance ?: emptyList(),
                 tasks = maid.tasks ?: emptyList(),
-                onMarkAttendance = { task ->
-                    viewModel.requestOtpForAttendance(maid.id)
-                    showAttendanceDialog = task
+                // --- UPDATE: Change to show selection dialog ---
+                onMarkAttendance = {
+                    showOtpTaskSelectionDialog = true
                 },
                 onMarkPresentManually = {
                     Log.d(TAG, "Manually Mark Present Button Clicked - Setting showManualAttendanceDialog to true")
@@ -701,6 +723,7 @@ fun ManualAttendanceDialog(
     var selectedTask by remember { mutableStateOf<Task?>(null) }
     var expanded by remember { mutableStateOf(false) }
     val isLoading = manualAttendanceState is ManualAttendanceState.Loading
+    val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
 
     val formattedDate = remember(selectedDateMillis) {
         selectedDateMillis?.let {
@@ -741,7 +764,7 @@ fun ManualAttendanceDialog(
                     ) {
                         tasks.forEach { task ->
                             DropdownMenuItem(
-                                text = { Text(task.name ?: "") },
+                                text = { Text("${task.name} (${task.frequency}, ${currencyFormat.format(task.price)})") },
                                 onClick = {
                                     selectedTask = task
                                     expanded = false
@@ -896,13 +919,16 @@ fun TasksSection(
         if (tasks.isEmpty()) {
             Text("No tasks assigned.")
         } else {
-            tasks.forEach { task ->
-                TaskItem(
-                    task = task,
-                    onEdit = { onEditTask(task) },
-                    // --- FIX: Pass task.id (which is nullable) ---
-                    onDelete = { onDeleteTask(task.id) }
-                )
+            // --- WRAP TaskItems in a Column with spacing ---
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                tasks.forEach { task ->
+                    TaskItem(
+                        task = task,
+                        onEdit = { onEditTask(task) },
+                        // --- FIX: Pass task.id (which is nullable) ---
+                        onDelete = { onDeleteTask(task.id) }
+                    )
+                }
             }
         }
     }
@@ -914,25 +940,55 @@ fun TaskItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(task.name ?: "", fontWeight = FontWeight.Bold)
-            Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
-        }
-        IconButton(onClick = onEdit) {
-            Icon(Icons.Default.Edit, "Edit Task")
-        }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, "Delete Task")
+    // --- WRAP Row in a Card ---
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp) // Add padding inside the card
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    task.name ?: "",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Text(
+                    "₹${task.price} - ${task.frequency ?: ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    "Edit Task",
+                    tint = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Delete,
+                    "Delete Task",
+                    tint = MaterialTheme.colorScheme.onPrimary
+                )
+            }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AttendanceSection(
     attendance: List<AttendanceRecord>,
     tasks: List<Task>,
-    onMarkAttendance: (Task) -> Unit,
+    onMarkAttendance: () -> Unit, // --- UPDATED SIGNATURE ---
     onMarkPresentManually: () -> Unit
 ) {
     Column {
@@ -943,12 +999,11 @@ fun AttendanceSection(
         if (tasks.isEmpty()) {
             Text("Add a task first.", style = MaterialTheme.typography.bodySmall)
         } else {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Present (OTP):", modifier = Modifier.align(Alignment.CenterVertically))
-                tasks.forEach { task ->
-                    Button(onClick = { onMarkAttendance(task) }) { Text(task.name ?: "") }
-                }
+            // --- REPLACED FlowRow with a single Button ---
+            Button(onClick = onMarkAttendance) {
+                Text("Mark Present (OTP)")
             }
+            // --- END REPLACEMENT ---
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = onMarkPresentManually) {
                 Text("Manually Mark Present")
@@ -999,6 +1054,103 @@ fun AttendanceItem(record: AttendanceRecord) {
         }
     }
 }
+
+// --- NEW DIALOG for Task Selection ---
+@Composable
+fun OtpTaskSelectionDialog(
+    tasks: List<Task>,
+    onDismiss: () -> Unit,
+    onTaskSelected: (Task) -> Unit
+) {
+    val currencyFormat = remember { DecimalFormat("₹ #,##0.00") }
+
+    // --- Change to standard Dialog with Card ---
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            // --- ADDED standard card colors ---
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                Text(
+                    text = "Select Task for Attendance",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+
+                // --- Add padding and spacing to LazyColumn ---
+                LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(tasks) { task ->
+                        // --- Use a custom TaskSelectItem ---
+                        TaskSelectItem(
+                            task = task,
+                            currencyFormat = currencyFormat,
+                            onClick = { onTaskSelected(task) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- NEW Composable for the task list item ---
+@Composable
+fun TaskSelectItem(
+    task: Task,
+    currencyFormat: DecimalFormat,
+    onClick: () -> Unit
+) {
+    // --- UPDATED to use Card with primary color ---
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick), // Clickable should be on the Card
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp), // Padding inside the card
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    task.name ?: "Unnamed Task",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Text(
+                    text = "${task.frequency} - ${currencyFormat.format(task.price)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+    }
+}
+// --- END NEW Composable ---
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1104,7 +1256,7 @@ fun EditTaskDialog(
                     )
                     ExposedDropdownMenu(
                         expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        onDismissRequest = { false }
                     ) {
                         frequencyOptions.forEach { option ->
                             DropdownMenuItem(
