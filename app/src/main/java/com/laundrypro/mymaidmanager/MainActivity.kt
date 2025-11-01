@@ -1348,6 +1348,12 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     val authResult by viewModel.authResult.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // --- NEW: Reset auth result when entering AuthScreen ---
+    LaunchedEffect(Unit) {
+        viewModel.resetAuthResult()
+    }
+    // --- END NEW ---
+
     LaunchedEffect(authResult) {
         // --- FIX: Create local immutable variable ---
         val result = authResult
