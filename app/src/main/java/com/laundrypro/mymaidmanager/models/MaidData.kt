@@ -6,6 +6,7 @@ data class Maid(
     @SerializedName("_id")
     val id: String,
     val name: String,
+    @SerializedName("mobileNo")
     val mobile: String,
     val address: String,
     val user: String,
@@ -31,12 +32,14 @@ data class AttendanceRecord(
 
 data class AddMaidRequest(
     val name: String,
+    @SerializedName("mobileNo")
     val mobile: String,
     val address: String
 )
 
 data class UpdateMaidRequest(
     val name: String,
+    @SerializedName("mobileNo")
     val mobile: String,
     val address: String
 )
