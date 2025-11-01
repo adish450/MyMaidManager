@@ -134,6 +134,22 @@ class MaidViewModel : ViewModel() {
         }
     }
 
+    fun updateTask(maidId: String, taskId: String, name: String, price: Double, frequency: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.updateTask(maidId, taskId, UpdateTaskRequest(name, price, frequency))
+                if (response.isSuccessful && response.body() != null) {
+                    // Update the state directly with the new maid object
+                    _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                } else {
+                    // Handle error (e.g., show a toast via a different state)
+                }
+            } catch (e: Exception) {
+                // Handle exception
+            }
+        }
+    }
+
     fun deleteTask(maidId: String, taskId: String) {
         viewModelScope.launch {
             try {

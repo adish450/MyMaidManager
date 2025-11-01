@@ -1,5 +1,7 @@
 package com.laundrypro.mymaidmanager
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -370,6 +372,7 @@ fun MaidDetailContent(
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
     var showManualAttendanceDialog by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
+    var showEditTaskDialog by remember { mutableStateOf<Task?>(null) } // <-- NEW STATE
 
     val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
     val manualAttendanceState by viewModel.manualAttendanceState.collectAsStateWithLifecycle()
@@ -414,6 +417,19 @@ fun MaidDetailContent(
             }
         )
     }
+
+    // --- NEW DIALOG ---
+    showEditTaskDialog?.let { task ->
+        EditTaskDialog(
+            task = task,
+            onDismiss = { showEditTaskDialog = null },
+            onEditTask = { name, price, freq ->
+                viewModel.updateTask(maid.id, task.id, name, price, freq)
+                showEditTaskDialog = null
+            }
+        )
+    }
+
 
     if (showDatePickerDialog) {
         CustomDatePickerDialog(
@@ -466,6 +482,7 @@ fun MaidDetailContent(
             TasksSection(
                 tasks = maid.tasks ?: emptyList(),
                 onAddTask = { showAddTaskDialog = true },
+                onEditTask = { task -> showEditTaskDialog = task }, // <-- NEW
                 onDeleteTask = { taskId -> viewModel.deleteTask(maid.id, taskId) }
             )
         }
@@ -717,8 +734,34 @@ fun ManualAttendanceDialog(
 
 @Composable
 fun MaidInfoSection(maid: Maid) {
+    val context = LocalContext.current // <-- NEW: Get context for Intent
+
     Column {
-        Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
+            // --- NEW: CALL BUTTON ---
+            IconButton(
+                onClick = {
+                    try {
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${maid.mobile}"))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to open dialer: ${e.message}")
+                        Toast.makeText(context, "Could not open dialer.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Call,
+                    contentDescription = "Call Maid",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
         Text("Mobile: ${maid.mobile ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
         Text("Address: ${maid.address ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
@@ -780,7 +823,12 @@ fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTo
 
 
 @Composable
-fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String) -> Unit) {
+fun TasksSection(
+    tasks: List<Task>,
+    onAddTask: () -> Unit,
+    onEditTask: (Task) -> Unit, // <-- NEW
+    onDeleteTask: (String) -> Unit
+) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text("Tasks", style = MaterialTheme.typography.headlineSmall)
@@ -790,19 +838,35 @@ fun TasksSection(tasks: List<Task>, onAddTask: () -> Unit, onDeleteTask: (String
         if (tasks.isEmpty()) {
             Text("No tasks assigned.")
         } else {
-            tasks.forEach { task -> TaskItem(task, onDelete = { onDeleteTask(task.id) }) }
+            tasks.forEach { task ->
+                TaskItem(
+                    task = task,
+                    onEdit = { onEditTask(task) }, // <-- NEW
+                    onDelete = { onDeleteTask(task.id) }
+                )
+            }
         }
     }
 }
 
 @Composable
-fun TaskItem(task: Task, onDelete: () -> Unit) {
+fun TaskItem(
+    task: Task,
+    onEdit: () -> Unit, // <-- NEW
+    onDelete: () -> Unit
+) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.weight(1f)) {
             Text(task.name ?: "", fontWeight = FontWeight.Bold)
             Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
         }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete Task") }
+        // --- NEW: EDIT BUTTON ---
+        IconButton(onClick = onEdit) {
+            Icon(Icons.Default.Edit, "Edit Task", tint = MaterialTheme.colorScheme.secondary)
+        }
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Default.Delete, "Delete Task", tint = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -905,6 +969,36 @@ fun AddTaskDialog(
         }
     }
 }
+
+// --- NEW DIALOG ---
+@Composable
+fun EditTaskDialog(
+    task: Task,
+    onDismiss: () -> Unit,
+    onEditTask: (name: String, price: Double, frequency: String) -> Unit
+) {
+    var name by remember { mutableStateOf(task.name ?: "") }
+    var price by remember { mutableStateOf(task.price.toString()) }
+    var frequency by remember { mutableStateOf(task.frequency ?: "") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(16.dp)) {
+            Column(modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Edit Task", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Task Name (e.g., Cooking)") }, singleLine = true)
+                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., 3000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (e.g., Daily)") }, singleLine = true)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Button(onClick = {
+                        onEditTask(name, price.toDoubleOrNull() ?: 0.0, frequency)
+                    }) { Text("Update Task") }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {

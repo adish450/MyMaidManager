@@ -54,3 +54,9 @@ data class AddTaskRequest(
     val price: Double,
     val frequency: String
 )
+
+data class UpdateTaskRequest(
+    val name: String,
+    val price: Double,
+    val frequency: String
+)

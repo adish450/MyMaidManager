@@ -34,6 +34,9 @@ interface ApiService {
     @POST("api/maids/{maidId}/tasks")
     suspend fun addTask(@Path("maidId") maidId: String, @Body addTaskRequest: AddTaskRequest): Response<List<Task>>
 
+    @PUT("api/maids/{maidId}/tasks/{taskId}")
+    suspend fun updateTask(@Path("maidId") maidId: String, @Path("taskId") taskId: String, @Body updateTaskRequest: UpdateTaskRequest): Response<Maid>
+
     @DELETE("api/maids/{maidId}/tasks/{taskId}")
     suspend fun deleteTask(@Path("maidId") maidId: String, @Path("taskId") taskId: String): Response<Unit>
 
