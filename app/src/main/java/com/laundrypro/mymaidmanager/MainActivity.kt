@@ -32,13 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-// --- REMOVED UNUSED LIFECYCLE IMPORTS ---
-// import androidx.compose.ui.platform.LocalLifecycleOwner
-// import androidx.lifecycle.Lifecycle
-// import androidx.lifecycle.LifecycleEventObserver
-// --- END REMOVED IMPORTS ---
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -54,7 +48,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.google.gson.JsonParser
-// Adjust import path
 import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
 import com.laundrypro.mymaidmanager.models.PayrollResponse
@@ -315,13 +308,16 @@ fun MaidDetailScreen(
 
     // Listen for delete success and navigate up
     LaunchedEffect(deleteState) {
-        if (deleteState is MaidDeleteState.Success) {
+        // --- FIX: Create local immutable variable ---
+        val state = deleteState
+
+        if (state is MaidDeleteState.Success) {
             Toast.makeText(context, "Maid deleted", Toast.LENGTH_SHORT).show()
             maidViewModel.resetDeleteState()
             onMaidDeleted() // Navigate back
         }
-        if(deleteState is MaidDeleteState.Error) {
-            Toast.makeText(context, (deleteState as MaidDeleteState.Error).message, Toast.LENGTH_SHORT).show()
+        if(state is MaidDeleteState.Error) {
+            Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
             maidViewModel.resetDeleteState()
         }
     }
@@ -414,11 +410,19 @@ fun MaidDetailContent(
     }
 
     LaunchedEffect(manualAttendanceState) {
-        if (manualAttendanceState is ManualAttendanceState.Success) {
-            Toast.makeText(context, "Absence Recorded", Toast.LENGTH_SHORT).show()
+        // --- FIX: Create local immutable variable ---
+        val state = manualAttendanceState
+
+        if (state is ManualAttendanceState.Success) {
+            Toast.makeText(context, "Attendance Recorded", Toast.LENGTH_SHORT).show()
             showManualAttendanceDialog = false
             selectedDateMillis = null
             viewModel.resetManualAttendanceState()
+        }
+        // --- Show error toast for manual attendance ---
+        if (state is ManualAttendanceState.Error) {
+            Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+            viewModel.resetManualAttendanceState() // Clear the error
         }
     }
 
@@ -522,8 +526,8 @@ fun MaidDetailContent(
                     viewModel.requestOtpForAttendance(maid.id)
                     showAttendanceDialog = task
                 },
-                onMarkAbsent = {
-                    Log.d(TAG, "Mark Absent Button Clicked - Setting showManualAttendanceDialog to true")
+                onMarkPresentManually = {
+                    Log.d(TAG, "Manually Mark Present Button Clicked - Setting showManualAttendanceDialog to true")
                     selectedDateMillis = System.currentTimeMillis()
                     showManualAttendanceDialog = true
                 }
@@ -609,47 +613,77 @@ fun CustomDatePickerDialog(
     onDismissRequest: () -> Unit,
     onDateSelected: (Long?) -> Unit
 ) {
+    // --- FIX: Robust date selection logic ---
+    val selectableDates = remember {
+        val localTimeZone = TimeZone.getDefault()
+
+        // Get today's date details in the local time zone
+        val localToday = Calendar.getInstance(localTimeZone).apply {
+            timeInMillis = System.currentTimeMillis()
+        }
+        val todayYear = localToday.get(Calendar.YEAR)
+        val todayDayOfYear = localToday.get(Calendar.DAY_OF_YEAR)
+
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                // Convert the calendar's UTC date to the local time zone for comparison
+                val givenCal = Calendar.getInstance(localTimeZone).apply {
+                    timeInMillis = utcTimeMillis
+                }
+                val givenYear = givenCal.get(Calendar.YEAR)
+                val givenDayOfYear = givenCal.get(Calendar.DAY_OF_YEAR)
+
+                // If the year is in the past, it's selectable
+                if (givenYear < todayYear) return true
+                // If the year is in the future, it's not
+                if (givenYear > todayYear) return false
+
+                // If it's the same year, check if the day is today or in the past
+                return givenDayOfYear <= todayDayOfYear
+            }
+        }
+    }
+    // --- END FIX ---
+
     val datePickerState = rememberDatePickerState(
-        initialSelectedDateMillis = initialSelectedDateMillis
+        initialSelectedDateMillis = initialSelectedDateMillis,
+        selectableDates = selectableDates // Use the new robust selectableDates logic
     )
 
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(
+        // --- FIX: Remove layout constraints that were cropping the view ---
+        Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
+                .wrapContentHeight(),
+            // .widthIn(max = 360.dp) // <-- REMOVED
+            shape = RoundedCornerShape(16.dp),
         ) {
-            Card(
-                modifier = Modifier
-                    .wrapContentHeight()
-                    .widthIn(max = 360.dp),
-                shape = RoundedCornerShape(16.dp),
+            Column(
+                // modifier = Modifier.padding(16.dp), // <-- REMOVED
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                DatePicker(state = datePickerState)
+                // Spacer(modifier = Modifier.height(16.dp)) // <-- REMOVED
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp), // Add padding back here
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    DatePicker(state = datePickerState)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = onDismissRequest) { Text("Cancel") }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(
-                            onClick = {
-                                onDateSelected(datePickerState.selectedDateMillis)
-                            }
-                        ) { Text("OK") }
-                    }
+                    TextButton(onClick = onDismissRequest) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            onDateSelected(datePickerState.selectedDateMillis)
+                        }
+                    ) { Text("OK") }
                 }
             }
         }
+        // --- END FIX ---
     }
 }
 
@@ -717,12 +751,12 @@ fun ManualAttendanceDialog(
                     }
                 }
 
-                val status = "Absent"
+                val status = "Present"
                 Text("Status: $status", style = MaterialTheme.typography.bodyLarge)
 
                 if (manualAttendanceState is ManualAttendanceState.Error) {
                     Text(
-                        text = manualAttendanceState.message,
+                        text = (manualAttendanceState as ManualAttendanceState.Error).message,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -746,7 +780,7 @@ fun ManualAttendanceDialog(
                         if (isLoading) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
                         } else {
-                            Text("Confirm Absent")
+                            Text("Confirm Present")
                         }
                     }
                 }
@@ -899,7 +933,7 @@ fun AttendanceSection(
     attendance: List<AttendanceRecord>,
     tasks: List<Task>,
     onMarkAttendance: (Task) -> Unit,
-    onMarkAbsent: () -> Unit
+    onMarkPresentManually: () -> Unit
 ) {
     Column {
         Text("Attendance", style = MaterialTheme.typography.headlineSmall)
@@ -916,8 +950,8 @@ fun AttendanceSection(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onMarkAbsent) {
-                Text("Manually Mark Absent")
+            Button(onClick = onMarkPresentManually) {
+                Text("Manually Mark Present")
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
@@ -1105,8 +1139,11 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
     val context = LocalContext.current
 
     LaunchedEffect(authResult) {
-        if (authResult is AuthResult.Error) {
-            val errorJsonString = (authResult as AuthResult.Error).message
+        // --- FIX: Create local immutable variable ---
+        val result = authResult
+
+        if (result is AuthResult.Error) {
+            val errorJsonString = result.message
             val displayMessage = try {
                 JsonParser().parse(errorJsonString).asJsonObject.get("msg").asString
             } catch (e: Exception) {
@@ -1384,14 +1421,22 @@ fun AttendanceOtpDialog(
     val context = LocalContext.current
 
     LaunchedEffect(otpState) {
-        if (otpState is OtpState.OtpRequested) {
+        // --- FIX: Create local immutable variable ---
+        val state = otpState
+
+        if (state is OtpState.OtpRequested) {
             Toast.makeText(context, "OTP has been sent to the maid's mobile.", Toast.LENGTH_LONG).show()
         }
-        if (otpState is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
+        if (state is OtpState.Idle && (viewModel.maidDetailUIState.value is MaidDetailUIState.Success)) {
             if (otpValue.isNotEmpty()){
                 Toast.makeText(context, "Attendance Marked Successfully!", Toast.LENGTH_SHORT).show()
                 onDismiss()
             }
+        }
+        // --- Show error toast for OTP ---
+        if (state is OtpState.Error) {
+            Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+            viewModel.resetOtpState() // Clear the error
         }
     }
 
@@ -1417,6 +1462,7 @@ fun AttendanceOtpDialog(
                     singleLine = true
                 )
                 if (otpState is OtpState.Error) {
+                    // This check is safe because 'otpState' is the original val
                     Text(
                         text = (otpState as OtpState.Error).message,
                         color = MaterialTheme.colorScheme.error,
