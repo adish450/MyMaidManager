@@ -1,5 +1,6 @@
 package com.laundrypro.mymaidmanager.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.JsonParser
@@ -143,7 +144,14 @@ class MaidViewModel : ViewModel() {
     }
 
     // --- NEW: updateTask function ---
-    fun updateTask(maidId: String, taskId: String, name: String, price: Double, frequency: String) {
+    fun updateTask(maidId: String, taskId: String?, name: String, price: Double, frequency: String) {
+        // --- FIX: Add null check for taskId ---
+        if (taskId == null) {
+            Log.e("MaidViewModel", "updateTask was called with a null taskId.")
+            // Optionally set an error state to show to the user
+            return // Don't proceed if taskId is null
+        }
+
         viewModelScope.launch {
             try {
                 val response = apiService.updateTask(maidId, taskId, UpdateTaskRequest(name, price, frequency))
@@ -161,7 +169,14 @@ class MaidViewModel : ViewModel() {
         }
     }
 
-    fun deleteTask(maidId: String, taskId: String) {
+    fun deleteTask(maidId: String, taskId: String?) {
+        // --- FIX: Add null check for taskId ---
+        if (taskId == null) {
+            Log.e("MaidViewModel", "deleteTask was called with a null taskId.")
+            // Optionally set an error state to show to the user
+            return // Don't proceed if taskId is null
+        }
+
         viewModelScope.launch {
             try {
                 val response = apiService.deleteTask(maidId, taskId)
