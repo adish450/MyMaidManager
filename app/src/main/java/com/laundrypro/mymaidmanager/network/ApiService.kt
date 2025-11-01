@@ -27,18 +27,17 @@ interface ApiService {
     @DELETE("api/maids/{id}")
     suspend fun deleteMaid(@Path("id") maidId: String): Response<Unit>
 
-    // New payroll endpoint
     @GET("api/maids/{maidId}/payroll")
     suspend fun getPayroll(@Path("maidId") maidId: String): Response<PayrollResponse>
 
     @POST("api/maids/{maidId}/tasks")
-    suspend fun addTask(@Path("maidId") maidId: String, @Body addTaskRequest: AddTaskRequest): Response<List<Task>>
+    suspend fun addTask(@Path("maidId") maidId: String, @Body addTaskRequest: AddTaskRequest): Response<Maid>
+
+    @DELETE("api/maids/{maidId}/tasks/{taskId}")
+    suspend fun deleteTask(@Path("maidId") maidId: String, @Path("taskId") taskId: String): Response<Maid>
 
     @PUT("api/maids/{maidId}/tasks/{taskId}")
     suspend fun updateTask(@Path("maidId") maidId: String, @Path("taskId") taskId: String, @Body updateTaskRequest: UpdateTaskRequest): Response<Maid>
-
-    @DELETE("api/maids/{maidId}/tasks/{taskId}")
-    suspend fun deleteTask(@Path("maidId") maidId: String, @Path("taskId") taskId: String): Response<Unit>
 
     @POST("api/maids/request-otp/{maidId}")
     suspend fun requestOtp(@Path("maidId") maidId: String): Response<Unit>

@@ -34,6 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+// --- REMOVED UNUSED LIFECYCLE IMPORTS ---
+// import androidx.compose.ui.platform.LocalLifecycleOwner
+// import androidx.lifecycle.Lifecycle
+// import androidx.lifecycle.LifecycleEventObserver
+// --- END REMOVED IMPORTS ---
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -92,6 +97,10 @@ fun AppNavigator(
     authViewModel: AuthViewModel
 ) {
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
+
+    // --- FIX: Create the ViewModel here to share it ---
+    val maidViewModel: MaidViewModel = viewModel()
+
     val startDestination = when (authState) {
         is AuthState.Authenticated -> Screen.MainList.route
         is AuthState.Unauthenticated -> Screen.Auth.route
@@ -113,6 +122,8 @@ fun AppNavigator(
         }
         composable(Screen.MainList.route) {
             MainListScreen(
+                // --- FIX: Pass the shared ViewModel ---
+                maidViewModel = maidViewModel,
                 onLogout = { authViewModel.logout() },
                 onMaidClicked = { maidId ->
                     navController.navigate(Screen.MaidDetail.createRoute(maidId))
@@ -123,9 +134,12 @@ fun AppNavigator(
             val maidId = backStackEntry.arguments?.getString("maidId")
             if (maidId != null) {
                 MaidDetailScreen(
+                    // --- FIX: Pass the shared ViewModel ---
+                    maidViewModel = maidViewModel,
                     maidId = maidId,
-                    onNavigateUp = { navController.navigateUp() },
-                    // New callback for when maid is deleted
+                    onNavigateUp = {
+                        navController.navigateUp()
+                    },
                     onMaidDeleted = {
                         navController.popBackStack() // Go back to the main list
                     }
@@ -149,16 +163,26 @@ fun AppNavigator(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
-    val maidViewModel: MaidViewModel = viewModel()
+fun MainListScreen(
+    // --- FIX: Accept the shared ViewModel ---
+    maidViewModel: MaidViewModel,
+    onLogout: () -> Unit,
+    onMaidClicked: (String) -> Unit
+) {
+    // --- FIX: Use the passed-in ViewModel ---
+    // val maidViewModel: MaidViewModel = viewModel() // <-- This was the bug
     val uiState by maidViewModel.maidListUIState.collectAsStateWithLifecycle()
     var showAddMaidDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(uiState) {
-        if (uiState is MaidListUIState.Loading || uiState is MaidListUIState.Error) {
+    // --- Add a one-time fetch on initial load ---
+    LaunchedEffect(Unit) {
+        // Only fetch if the list isn't already loaded
+        if (uiState !is MaidListUIState.Success) {
             maidViewModel.fetchMaids()
         }
     }
+    // --- END ---
+
 
     if (showAddMaidDialog) {
         AddMaidDialog(
@@ -198,7 +222,7 @@ fun MainListScreen(onLogout: () -> Unit, onMaidClicked: (String) -> Unit) {
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(state.maids) { maid ->
+                            items(state.maids, key = { it.id }) { maid ->
                                 MaidCard(maid, onClick = { onMaidClicked(maid.id) })
                             }
                         }
@@ -273,13 +297,16 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaidDetailScreen(
+    // --- FIX: Accept the shared ViewModel ---
+    maidViewModel: MaidViewModel,
     maidId: String,
     onNavigateUp: () -> Unit,
-    onMaidDeleted: () -> Unit // <-- Accept new callback
+    onMaidDeleted: () -> Unit
 ) {
-    val viewModel: MaidViewModel = viewModel()
-    val uiState by viewModel.maidDetailUIState.collectAsStateWithLifecycle()
-    val deleteState by viewModel.deleteState.collectAsStateWithLifecycle()
+    // --- FIX: Use the passed-in ViewModel ---
+    // val viewModel: MaidViewModel = viewModel() // <-- This was the bug
+    val uiState by maidViewModel.maidDetailUIState.collectAsStateWithLifecycle()
+    val deleteState by maidViewModel.deleteState.collectAsStateWithLifecycle()
 
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -290,17 +317,17 @@ fun MaidDetailScreen(
     LaunchedEffect(deleteState) {
         if (deleteState is MaidDeleteState.Success) {
             Toast.makeText(context, "Maid deleted", Toast.LENGTH_SHORT).show()
-            viewModel.resetDeleteState()
+            maidViewModel.resetDeleteState()
             onMaidDeleted() // Navigate back
         }
         if(deleteState is MaidDeleteState.Error) {
             Toast.makeText(context, (deleteState as MaidDeleteState.Error).message, Toast.LENGTH_SHORT).show()
-            viewModel.resetDeleteState()
+            maidViewModel.resetDeleteState()
         }
     }
 
     LaunchedEffect(key1 = maidId) {
-        viewModel.fetchMaidDetails(maidId)
+        maidViewModel.fetchMaidDetails(maidId)
     }
 
     Scaffold(
@@ -312,7 +339,6 @@ fun MaidDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                // --- ADDED ACTIONS ---
                 actions = {
                     IconButton(onClick = { showEditDialog = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit Maid")
@@ -334,7 +360,7 @@ fun MaidDetailScreen(
                             maid = state.maid,
                             onDismiss = { showEditDialog = false },
                             onConfirm = { name, mobile, address ->
-                                viewModel.updateMaid(maidId, name, mobile, address)
+                                maidViewModel.updateMaid(maidId, name, mobile, address)
                                 showEditDialog = false
                             }
                         )
@@ -344,7 +370,7 @@ fun MaidDetailScreen(
                             maidName = state.maid.name,
                             onDismiss = { showDeleteDialog = false },
                             onConfirm = {
-                                viewModel.deleteMaid(maidId)
+                                maidViewModel.deleteMaid(maidId)
                                 showDeleteDialog = false
                             },
                             isLoading = deleteState is MaidDeleteState.Loading
@@ -353,7 +379,7 @@ fun MaidDetailScreen(
 
                     MaidDetailContent(
                         maid = state.maid,
-                        viewModel = viewModel
+                        viewModel = maidViewModel // Pass the shared ViewModel
                     )
                 }
                 is MaidDetailUIState.Error -> Text(state.message, modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.error)
@@ -366,13 +392,14 @@ fun MaidDetailScreen(
 @Composable
 fun MaidDetailContent(
     maid: Maid,
-    viewModel: MaidViewModel
+    viewModel: MaidViewModel // <-- Accept the shared ViewModel
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
+    var showEditTaskDialog by remember { mutableStateOf<Task?>(null) }
+
     var showAttendanceDialog by remember { mutableStateOf<Task?>(null) }
     var showManualAttendanceDialog by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
-    var showEditTaskDialog by remember { mutableStateOf<Task?>(null) } // <-- NEW STATE
 
     val payrollState by viewModel.payrollUIState.collectAsStateWithLifecycle()
     val manualAttendanceState by viewModel.manualAttendanceState.collectAsStateWithLifecycle()
@@ -404,6 +431,18 @@ fun MaidDetailContent(
             }
         )
     }
+
+    showEditTaskDialog?.let { task ->
+        EditTaskDialog(
+            task = task,
+            onDismiss = { showEditTaskDialog = null },
+            onEditTask = { taskId, name, price, freq ->
+                viewModel.updateTask(maid.id, taskId, name, price, freq)
+                showEditTaskDialog = null
+            }
+        )
+    }
+
     showAttendanceDialog?.let { task ->
         AttendanceOtpDialog(
             maidName = maid.name ?: "Maid",
@@ -417,19 +456,6 @@ fun MaidDetailContent(
             }
         )
     }
-
-    // --- NEW DIALOG ---
-    showEditTaskDialog?.let { task ->
-        EditTaskDialog(
-            task = task,
-            onDismiss = { showEditTaskDialog = null },
-            onEditTask = { name, price, freq ->
-                viewModel.updateTask(maid.id, task.id, name, price, freq)
-                showEditTaskDialog = null
-            }
-        )
-    }
-
 
     if (showDatePickerDialog) {
         CustomDatePickerDialog(
@@ -482,7 +508,7 @@ fun MaidDetailContent(
             TasksSection(
                 tasks = maid.tasks ?: emptyList(),
                 onAddTask = { showAddTaskDialog = true },
-                onEditTask = { task -> showEditTaskDialog = task }, // <-- NEW
+                onEditTask = { task -> showEditTaskDialog = task },
                 onDeleteTask = { taskId -> viewModel.deleteTask(maid.id, taskId) }
             )
         }
@@ -504,16 +530,13 @@ fun MaidDetailContent(
     }
 }
 
-// --- NEW DIALOG: EditMaidDialog ---
 @Composable
 fun EditMaidDialog(
     maid: Maid,
     onDismiss: () -> Unit,
     onConfirm: (name: String, mobile: String, address: String) -> Unit
 ) {
-    // Pre-fill state with existing maid data
     var name by remember { mutableStateOf(maid.name ?: "") }
-    // Remove "+91" prefix for editing, as the UI adds it
     var mobile by remember { mutableStateOf(maid.mobile?.removePrefix("+91") ?: "") }
     var address by remember { mutableStateOf(maid.address ?: "") }
 
@@ -547,7 +570,6 @@ fun EditMaidDialog(
     }
 }
 
-// --- NEW DIALOG: DeleteConfirmationDialog ---
 @Composable
 fun DeleteConfirmationDialog(
     maidName: String,
@@ -734,37 +756,35 @@ fun ManualAttendanceDialog(
 
 @Composable
 fun MaidInfoSection(maid: Maid) {
-    val context = LocalContext.current // <-- NEW: Get context for Intent
+    // --- NEW: Add context for phone intent ---
+    val context = LocalContext.current
 
     Column {
+        Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // --- NEW: Clickable row for phone ---
         Row(
-            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(maid.name ?: "Unnamed Maid", style = MaterialTheme.typography.headlineMedium)
-            // --- NEW: CALL BUTTON ---
-            IconButton(
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Mobile: ${maid.mobile ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
+                Text("Address: ${maid.address ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
+            }
+            // --- NEW: Call Button ---
+            Button(
                 onClick = {
-                    try {
-                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${maid.mobile}"))
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to open dialer: ${e.message}")
-                        Toast.makeText(context, "Could not open dialer.", Toast.LENGTH_SHORT).show()
+                    val intent = Intent(Intent.ACTION_DIAL).apply {
+                        data = Uri.parse("tel:${maid.mobile}")
                     }
-                }
+                    context.startActivity(intent)
+                },
+                contentPadding = PaddingValues(12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Call,
-                    contentDescription = "Call Maid",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                Icon(Icons.Default.Call, contentDescription = "Call Maid")
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Mobile: ${maid.mobile ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
-        Text("Address: ${maid.address ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -826,7 +846,8 @@ fun PayrollRow(label: String, amount: String, isDeduction: Boolean = false, isTo
 fun TasksSection(
     tasks: List<Task>,
     onAddTask: () -> Unit,
-    onEditTask: (Task) -> Unit, // <-- NEW
+    // --- NEW: Add onEditTask parameter ---
+    onEditTask: (Task) -> Unit,
     onDeleteTask: (String) -> Unit
 ) {
     Column {
@@ -838,10 +859,11 @@ fun TasksSection(
         if (tasks.isEmpty()) {
             Text("No tasks assigned.")
         } else {
+            // --- NEW: Pass onEdit handler to TaskItem ---
             tasks.forEach { task ->
                 TaskItem(
                     task = task,
-                    onEdit = { onEditTask(task) }, // <-- NEW
+                    onEdit = { onEditTask(task) },
                     onDelete = { onDeleteTask(task.id) }
                 )
             }
@@ -852,7 +874,8 @@ fun TasksSection(
 @Composable
 fun TaskItem(
     task: Task,
-    onEdit: () -> Unit, // <-- NEW
+    // --- NEW: Add onEdit parameter ---
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -860,12 +883,12 @@ fun TaskItem(
             Text(task.name ?: "", fontWeight = FontWeight.Bold)
             Text("₹${task.price} - ${task.frequency ?: ""}", style = MaterialTheme.typography.bodySmall)
         }
-        // --- NEW: EDIT BUTTON ---
+        // --- NEW: Edit Button ---
         IconButton(onClick = onEdit) {
-            Icon(Icons.Default.Edit, "Edit Task", tint = MaterialTheme.colorScheme.secondary)
+            Icon(Icons.Default.Edit, "Edit Task")
         }
         IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, "Delete Task", tint = MaterialTheme.colorScheme.error)
+            Icon(Icons.Default.Delete, "Delete Task")
         }
     }
 }
@@ -970,12 +993,12 @@ fun AddTaskDialog(
     }
 }
 
-// --- NEW DIALOG ---
+// --- NEW DIALOG: EditTaskDialog ---
 @Composable
 fun EditTaskDialog(
     task: Task,
     onDismiss: () -> Unit,
-    onEditTask: (name: String, price: Double, frequency: String) -> Unit
+    onEditTask: (taskId: String, name: String, price: Double, frequency: String) -> Unit
 ) {
     var name by remember { mutableStateOf(task.name ?: "") }
     var price by remember { mutableStateOf(task.price.toString()) }
@@ -991,7 +1014,7 @@ fun EditTaskDialog(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
-                        onEditTask(name, price.toDoubleOrNull() ?: 0.0, frequency)
+                        onEditTask(task.id, name, price.toDoubleOrNull() ?: 0.0, frequency)
                     }) { Text("Update Task") }
                 }
             }

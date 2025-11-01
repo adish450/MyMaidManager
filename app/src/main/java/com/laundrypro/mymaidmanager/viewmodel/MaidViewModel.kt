@@ -3,7 +3,7 @@ package com.laundrypro.mymaidmanager.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.JsonParser
-// Adjust import path to 'models'
+// Adjust import path
 import com.laundrypro.mymaidmanager.models.*
 import com.laundrypro.mymaidmanager.network.RetrofitClient
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,10 +72,9 @@ class MaidViewModel : ViewModel() {
 
     fun fetchMaids() {
         viewModelScope.launch {
-            // Only show full loading on initial load or retry from error
-            if (_maidListUIState.value !is MaidListUIState.Success) {
-                _maidListUIState.value = MaidListUIState.Loading
-            }
+            // --- FIX: Always set to Loading to ensure refresh ---
+            _maidListUIState.value = MaidListUIState.Loading
+
             try {
                 val response = apiService.getMaids()
                 if (response.isSuccessful && response.body() != null) {
@@ -96,6 +95,7 @@ class MaidViewModel : ViewModel() {
                 if (response.isSuccessful) {
                     fetchMaids() // Refresh the list
                 } else {
+                    // This error is not shown, but good practice
                     _maidListUIState.value = MaidListUIState.Error("Failed to add maid. Please try again.")
                 }
             } catch (e: Exception) {
@@ -126,23 +126,34 @@ class MaidViewModel : ViewModel() {
     fun addTask(maidId: String, name: String, price: Double, frequency: String) {
         viewModelScope.launch {
             try {
-                apiService.addTask(maidId, AddTaskRequest(name, price, frequency))
-                fetchMaidDetails(maidId) // Refresh details
+                // Pass the request body
+                val response = apiService.addTask(maidId, AddTaskRequest(name, price, frequency))
+                if (response.isSuccessful && response.body() != null) {
+                    // Update the detail screen with the new maid object from response
+                    _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                    fetchPayroll(maidId) // Refresh payroll after adding task
+                    fetchMaids() // --- FIX: Refresh main list ---
+                } else {
+                    // Handle error
+                }
             } catch (e: Exception) {
                 // You can add error handling for the detail screen here
             }
         }
     }
 
+    // --- NEW: updateTask function ---
     fun updateTask(maidId: String, taskId: String, name: String, price: Double, frequency: String) {
         viewModelScope.launch {
             try {
                 val response = apiService.updateTask(maidId, taskId, UpdateTaskRequest(name, price, frequency))
                 if (response.isSuccessful && response.body() != null) {
-                    // Update the state directly with the new maid object
+                    // Update the detail screen with the new maid object from response
                     _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                    fetchPayroll(maidId) // Refresh payroll after updating task
+                    fetchMaids() // --- FIX: Refresh main list ---
                 } else {
-                    // Handle error (e.g., show a toast via a different state)
+                    // Handle error (e.g., show a toast)
                 }
             } catch (e: Exception) {
                 // Handle exception
@@ -153,8 +164,15 @@ class MaidViewModel : ViewModel() {
     fun deleteTask(maidId: String, taskId: String) {
         viewModelScope.launch {
             try {
-                apiService.deleteTask(maidId, taskId)
-                fetchMaidDetails(maidId) // Refresh details
+                val response = apiService.deleteTask(maidId, taskId)
+                if (response.isSuccessful && response.body() != null) {
+                    // Update the detail screen with the new maid object from response
+                    _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                    fetchPayroll(maidId) // Refresh payroll after deleting task
+                    fetchMaids() // --- FIX: Refresh main list ---
+                } else {
+                    // Handle error
+                }
             } catch (e: Exception) {
                 // You can add error handling for the detail screen here
             }
@@ -210,12 +228,13 @@ class MaidViewModel : ViewModel() {
 
     fun updateMaid(maidId: String, name: String, mobile: String, address: String) {
         viewModelScope.launch {
-            _maidDetailUIState.value = MaidDetailUIState.Loading
+            // Don't set detail state to loading, to avoid flicker
+            // _maidDetailUIState.value = MaidDetailUIState.Loading
             try {
                 val response = apiService.updateMaid(maidId, UpdateMaidRequest(name, mobile, address))
                 if (response.isSuccessful && response.body() != null) {
                     _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
-                    fetchMaids() // Also refresh the main list
+                    fetchMaids() // --- FIX: Refresh main list ---
                 } else {
                     _maidDetailUIState.value = MaidDetailUIState.Error("Failed to update maid")
                 }
@@ -232,7 +251,7 @@ class MaidViewModel : ViewModel() {
                 val response = apiService.deleteMaid(maidId)
                 if (response.isSuccessful) {
                     _deleteState.value = MaidDeleteState.Success
-                    fetchMaids() // Refresh the main list
+                    fetchMaids() // --- FIX: Refresh main list ---
                 } else {
                     _deleteState.value = MaidDeleteState.Error("Failed to delete maid")
                 }
@@ -270,6 +289,7 @@ class MaidViewModel : ViewModel() {
                 if (response.isSuccessful) {
                     _otpState.value = OtpState.Idle
                     fetchMaidDetails(maidId) // Refresh details
+                    fetchPayroll(maidId) // Refresh payroll
                 } else {
                     val errorMsg = response.errorBody()?.string()?.let {
                         try {
