@@ -1868,16 +1868,6 @@ fun AttendanceHistoryScreen(
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
-
-                        // 7. Add a simple legend - **NOTE: This legend won't match the calendar above**
-                        // We will keep it simple for now as we can't color the dates
-                        Text(
-                            "Select a date to view attendance records.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
                         Divider(
                             modifier = Modifier.padding(horizontal = 16.dp), // Add padding here
                             thickness = 1.dp // --- Make divider thinner ---
