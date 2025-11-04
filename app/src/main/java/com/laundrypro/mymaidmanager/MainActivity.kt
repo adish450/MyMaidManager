@@ -65,6 +65,12 @@ import java.util.*
 
 private const val TAG = "MainActivity"
 
+// --- ADDED: Helper function for email validation ---
+private fun isEmailValid(email: String): Boolean {
+    return android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()
+}
+// --- END ADD ---
+
 sealed class Screen(val route: String) {
     object Auth : Screen("auth_screen")
     object MainList : Screen("main_list_screen")
@@ -1095,20 +1101,43 @@ fun AttendanceSection(
 
 @Composable
 fun AttendanceItem(record: AttendanceRecord) {
+    // --- FIX for Time Display ---
     val formattedDate = remember(record.date) {
         try {
             val dateString = record.date ?: return@remember "Invalid Date"
             val pattern1 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
             val pattern2 = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+
             val parser = try { SimpleDateFormat(pattern1, Locale.getDefault()) } catch (e: IllegalArgumentException) { SimpleDateFormat(pattern2, Locale.getDefault()) }
             parser.timeZone = TimeZone.getTimeZone("UTC") // Input date is UTC
-            val date = parser.parse(dateString)
-            date?.let { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it) } ?: dateString
+
+            val date = parser.parse(dateString) ?: return@remember dateString
+
+            // Check if the time is exactly midnight UTC
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            cal.time = date
+            val isMidnightUtc = cal.get(Calendar.HOUR_OF_DAY) == 0 &&
+                    cal.get(Calendar.MINUTE) == 0 &&
+                    cal.get(Calendar.SECOND) == 0
+
+            val displayFormatString = if (isMidnightUtc) {
+                "dd MMM yyyy" // Date only for manual entries
+            } else {
+                "dd MMM yyyy, hh:mm a" // Date and time for OTP entries
+            }
+
+            // Format for local display
+            val displayFormatter = SimpleDateFormat(displayFormatString, Locale.getDefault())
+            // No need to set timeZone on displayFormatter, it will use the device default
+            displayFormatter.format(date)
+
         } catch (e: Exception) {
             Log.e(TAG, "Date parsing error for '${record.date}': ${e.message}")
             record.date ?: "Invalid Date"
         }
     }
+    // --- END FIX ---
+
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(formattedDate, modifier = Modifier.weight(1f))
         Text(record.taskName ?: "", fontWeight = FontWeight.Bold)
@@ -1346,6 +1375,10 @@ fun EditTaskDialog(
     }
 }
 
+// --- Helper function for email validation ---
+// private fun isEmailValid(email: String): Boolean { // --- MOVED TO TOP LEVEL ---
+//    return android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()
+// }
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
@@ -1458,11 +1491,12 @@ fun LoginForm(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val isLoading = authResult is AuthResult.Loading
+    val isEmailValid = remember(email) { isEmailValid(email) } // --- ADDED ---
 
     Column(
         modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp) // --- Reduced spacing ---
     ) {
         Text("Welcome Back!", style = MaterialTheme.typography.titleLarge)
 
@@ -1473,8 +1507,19 @@ fun LoginForm(
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             enabled = !isLoading,
+            isError = email.isNotEmpty() && !isEmailValid, // --- ADDED ---
             singleLine = true
         )
+        // --- ADDED: Error Message ---
+        if (email.isNotEmpty() && !isEmailValid) {
+            Text(
+                text = "Please enter a valid email address.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp)
+            )
+        }
+        // --- END ADD ---
 
         OutlinedTextField(
             value = password,
@@ -1493,11 +1538,12 @@ fun LoginForm(
             singleLine = true
         )
 
+        Spacer(modifier = Modifier.height(4.dp)) // --- Added spacer ---
         Button(
             onClick = { onLoginClicked(email, password) },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
-            enabled = !isLoading && email.isNotEmpty() && password.isNotEmpty()
+            enabled = !isLoading && email.isNotEmpty() && password.isNotEmpty() && isEmailValid // --- ADDED EMAIL VALIDATION ---
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -1529,6 +1575,7 @@ fun SignUpForm(
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     val isLoading = authResult is AuthResult.Loading
 
+    val isEmailValid = remember(email) { isEmailValid(email) } // --- ADDED ---
     val passwordValidation = remember(password) { validatePassword(password) }
     val passwordsMatch = remember(password, confirmPassword) { password == confirmPassword }
 
@@ -1549,8 +1596,19 @@ fun SignUpForm(
             value = email, onValueChange = { email = it },
             label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), enabled = !isLoading,
+            isError = email.isNotEmpty() && !isEmailValid, // --- ADDED ---
             singleLine = true
         )
+        // --- ADDED: Error Message ---
+        if (email.isNotEmpty() && !isEmailValid) {
+            Text(
+                text = "Please enter a valid email address.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp)
+            )
+        }
+        // --- END ADD ---
 
         OutlinedTextField(
             value = password,
@@ -1571,7 +1629,7 @@ fun SignUpForm(
                 text = passwordValidation.joinToString("\n"),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp) // --- Added padding ---
             )
         }
 
@@ -1594,7 +1652,7 @@ fun SignUpForm(
                 text = "Passwords do not match.",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp) // --- Added padding ---
             )
         }
 
@@ -1603,7 +1661,7 @@ fun SignUpForm(
             onClick = { onSignUpClicked(name, email, password) },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
-            enabled = passwordValidation.isEmpty() && passwordsMatch && email.isNotEmpty() && password.isNotEmpty() && name.isNotEmpty() && !isLoading
+            enabled = passwordValidation.isEmpty() && passwordsMatch && email.isNotEmpty() && password.isNotEmpty() && name.isNotEmpty() && !isLoading && isEmailValid // --- ADDED EMAIL VALIDATION ---
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -1872,17 +1930,6 @@ fun AttendanceHistoryScreen(
                             // --- We cannot customize individual cells here, so dayContent is removed ---
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // 7. Add a simple legend - **NOTE: This legend won't match the calendar above**
-                        // We will keep it simple for now as we can't color the dates
-                        Text(
-                            "Select a date to view attendance records.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
                         Divider(
                             modifier = Modifier.padding(horizontal = 16.dp), // Add padding here
                             thickness = 1.dp // --- Make divider thinner ---
