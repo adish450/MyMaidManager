@@ -126,7 +126,11 @@ fun AppNavigator(
             MainListScreen(
                 // --- FIX: Pass the shared ViewModel ---
                 maidViewModel = maidViewModel,
-                onLogout = { authViewModel.logout() },
+                onLogout = {
+                    // --- FIX: Clear ViewModel state on logout ---
+                    maidViewModel.clearMaidData()
+                    authViewModel.logout()
+                },
                 onMaidClicked = { maidId ->
                     navController.navigate(Screen.MaidDetail.createRoute(maidId))
                 }
@@ -323,6 +327,7 @@ fun MaidCard(maid: Maid, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // --- ADDED Explicit Labels ---
                 Text("Name: ${maid.name ?: ""}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("Mobile: ${maid.mobile ?: ""}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 Text("Address: ${maid.address ?: ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -1393,7 +1398,7 @@ fun AuthScreen(viewModel: AuthViewModel, onLoginSuccess: () -> Unit) {
             modifier = Modifier.padding(24.dp)
         ) {
             Icon(
-                imageVector = Icons.Filled.CleaningServices,
+                imageVector = Icons.Filled.HomeWork, // --- CHANGED ICON ---
                 contentDescription = "App Logo",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(80.dp)
@@ -1865,6 +1870,16 @@ fun AttendanceHistoryScreen(
                             showModeToggle = false, // Hide toggle
                             modifier = Modifier.padding(top = 16.dp) // Add padding here
                             // --- We cannot customize individual cells here, so dayContent is removed ---
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 7. Add a simple legend - **NOTE: This legend won't match the calendar above**
+                        // We will keep it simple for now as we can't color the dates
+                        Text(
+                            "Select a date to view attendance records.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))

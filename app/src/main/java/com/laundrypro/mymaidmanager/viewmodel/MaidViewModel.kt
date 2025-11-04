@@ -71,6 +71,18 @@ class MaidViewModel : ViewModel() {
 
     private val apiService = RetrofitClient.apiService
 
+    // --- NEW FUNCTION TO CLEAR ALL STATE ---
+    fun clearMaidData() {
+        Log.d("MaidViewModel", "Clearing all maid data from ViewModel")
+        _maidListUIState.value = MaidListUIState.Loading
+        _maidDetailUIState.value = MaidDetailUIState.Loading
+        _payrollUIState.value = PayrollUIState.Loading
+        _deleteState.value = MaidDeleteState.Idle
+        _otpState.value = OtpState.Idle
+        _manualAttendanceState.value = ManualAttendanceState.Idle
+    }
+    // --- END NEW FUNCTION ---
+
     fun fetchMaids() {
         viewModelScope.launch {
             // --- FIX: Always set to Loading to ensure refresh ---
