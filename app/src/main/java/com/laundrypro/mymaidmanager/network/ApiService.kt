@@ -47,4 +47,7 @@ interface ApiService {
 
     @POST("api/maids/{maidId}/attendance/manual")
     suspend fun addManualAttendance(@Path("maidId") maidId: String, @Body request: AddManualAttendanceRequest): Response<List<AttendanceRecord>>
+
+    @POST("api/maids/{maidId}/notes")
+    suspend fun addNote(@Path("maidId") maidId: String, @Body request: AddNoteRequest): Response<Maid>
 }

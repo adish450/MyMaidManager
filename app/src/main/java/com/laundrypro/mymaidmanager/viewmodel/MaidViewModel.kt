@@ -48,6 +48,15 @@ sealed class MaidDeleteState {
     data class Error(val message: String) : MaidDeleteState()
 }
 
+// --- NEWLY ADDED ---
+sealed class AddNoteState {
+    object Idle : AddNoteState()
+    object Loading : AddNoteState()
+    object Success : AddNoteState()
+    data class Error(val message: String) : AddNoteState()
+}
+// --- END NEW ---
+
 
 // --- MaidViewModel ---
 class MaidViewModel : ViewModel() {
@@ -69,6 +78,11 @@ class MaidViewModel : ViewModel() {
     private val _deleteState = MutableStateFlow<MaidDeleteState>(MaidDeleteState.Idle)
     val deleteState: StateFlow<MaidDeleteState> = _deleteState.asStateFlow()
 
+    // --- NEWLY ADDED ---
+    private val _addNoteState = MutableStateFlow<AddNoteState>(AddNoteState.Idle)
+    val addNoteState: StateFlow<AddNoteState> = _addNoteState.asStateFlow()
+    // --- END NEW ---
+
     private val apiService = RetrofitClient.apiService
 
     // --- NEW FUNCTION TO CLEAR ALL STATE ---
@@ -80,6 +94,7 @@ class MaidViewModel : ViewModel() {
         _deleteState.value = MaidDeleteState.Idle
         _otpState.value = OtpState.Idle
         _manualAttendanceState.value = ManualAttendanceState.Idle
+        _addNoteState.value = AddNoteState.Idle // --- NEWLY ADDED ---
     }
     // --- END NEW FUNCTION ---
 
@@ -333,5 +348,32 @@ class MaidViewModel : ViewModel() {
 
     fun resetOtpState() {
         _otpState.value = OtpState.Idle
+    }
+
+    fun addNoteToMaid(maidId: String, date: String, text: String) {
+        viewModelScope.launch {
+            _addNoteState.value = AddNoteState.Loading
+            try {
+                val response = apiService.addNote(maidId, AddNoteRequest(date, text))
+                if (response.isSuccessful && response.body() != null) {
+                    // Update the detail state with the new maid object from response
+                    _maidDetailUIState.value = MaidDetailUIState.Success(response.body()!!)
+                    _addNoteState.value = AddNoteState.Success
+                } else {
+                    val errorMsg = response.errorBody()?.string()?.let {
+                        try {
+                            JsonParser().parse(it).asJsonObject.get("msg").asString
+                        } catch (e: Exception) { "Failed to add note" }
+                    } ?: "Failed to add note"
+                    _addNoteState.value = AddNoteState.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                _addNoteState.value = AddNoteState.Error(e.message ?: "An error occurred")
+            }
+        }
+    }
+
+    fun resetAddNoteState() {
+        _addNoteState.value = AddNoteState.Idle
     }
 }

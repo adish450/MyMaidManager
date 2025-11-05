@@ -37,7 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -57,6 +59,7 @@ import com.laundrypro.mymaidmanager.models.AttendanceRecord
 import com.laundrypro.mymaidmanager.models.Maid
 import com.laundrypro.mymaidmanager.models.PayrollResponse
 import com.laundrypro.mymaidmanager.models.Task
+import com.laundrypro.mymaidmanager.models.Note // --- NEWLY ADDED ---
 import com.laundrypro.mymaidmanager.ui.theme.MyMaidManagerTheme
 import com.laundrypro.mymaidmanager.viewmodel.*
 import java.text.DecimalFormat
@@ -1780,12 +1783,39 @@ fun AttendanceHistoryScreen(
     onNavigateUp: () -> Unit
 ) {
     val uiState by maidViewModel.maidDetailUIState.collectAsStateWithLifecycle()
+    // --- NEW: State for note dialog ---
+    val addNoteState by maidViewModel.addNoteState.collectAsStateWithLifecycle()
+    var showAddNoteDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // --- NEW: Listen for note state changes ---
+    LaunchedEffect(addNoteState) {
+        val state = addNoteState
+        if (state is AddNoteState.Success) {
+            Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+            maidViewModel.resetAddNoteState()
+            showAddNoteDialog = false
+        }
+        if (state is AddNoteState.Error) {
+            Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+            maidViewModel.resetAddNoteState()
+        }
+    }
 
     // Fetch details if not already loaded (e.g., if process was restored)
     LaunchedEffect(maidId) {
         if (maidViewModel.maidDetailUIState.value !is MaidDetailUIState.Success) {
             maidViewModel.fetchMaidDetails(maidId)
         }
+    }
+
+    // --- NEW: Helper to format selected date to YYYY-MM-DD ---
+    val getFormattedDate: (Long?) -> String = { millis ->
+        millis?.let {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.format(Date(it))
+        } ?: ""
     }
 
     Scaffold(
@@ -1867,7 +1897,8 @@ fun AttendanceHistoryScreen(
                             timeZone = TimeZone.getTimeZone("UTC")
                         }
 
-                        state.maid.attendance
+                        // --- CRASH FIX: Added ?: emptyList() ---
+                        (state.maid.attendance ?: emptyList())
                             .filter { it.status == "Present" }
                             .mapNotNull { record ->
                                 // Try parsing both date formats
@@ -1890,7 +1921,8 @@ fun AttendanceHistoryScreen(
                     val selectedDateRecords = remember(datePickerState.selectedDateMillis, state.maid.attendance) {
                         val selectedUtc = datePickerState.selectedDateMillis?.let { normalizeDateToUtc(it) } ?: normalizeDateToUtc(System.currentTimeMillis())
 
-                        state.maid.attendance.filter { record ->
+                        // --- CRASH FIX: Added ?: emptyList() ---
+                        (state.maid.attendance ?: emptyList()).filter { record ->
                             val recordDate = try {
                                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).apply {
                                     timeZone = TimeZone.getTimeZone("UTC")
@@ -1907,15 +1939,54 @@ fun AttendanceHistoryScreen(
                         }
                     }
 
+                    // --- NEW: Filter notes for the selected date ---
+                    val selectedDateNotes = remember(datePickerState.selectedDateMillis, state.maid.notes) {
+                        val selectedUtc = datePickerState.selectedDateMillis?.let { normalizeDateToUtc(it) } ?: normalizeDateToUtc(System.currentTimeMillis())
+
+                        // --- CRASH FIX: Added ?: emptyList() ---
+                        (state.maid.notes ?: emptyList()).filter { note ->
+                            val noteDate = try {
+                                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).apply {
+                                    timeZone = TimeZone.getTimeZone("UTC")
+                                }
+                                val sdfWithMillis = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).apply {
+                                    timeZone = TimeZone.getTimeZone("UTC")
+                                }
+                                val date = try { sdf.parse(note.date) } catch (e: Exception) { sdfWithMillis.parse(note.date) }
+                                date?.let { normalizeDateToUtc(it.time) }
+                            } catch (e: Exception) {
+                                null
+                            }
+                            noteDate == selectedUtc
+                        }
+                    }
+                    // --- END NEW ---
+
                     // 5. Define custom colors for the calendar cells - **FIXED**
                     val datePickerColors = DatePickerDefaults.colors(
                         // --- Removed faulty parameters ---
                         // We will use the default theme colors
                     )
 
+                    // --- NEW: Call the AddNoteDialog ---
+                    if (showAddNoteDialog) {
+                        AddNoteDialog(
+                            isLoading = addNoteState is AddNoteState.Loading,
+                            onDismiss = { showAddNoteDialog = false },
+                            onConfirm = { noteText ->
+                                val formattedDate = getFormattedDate(datePickerState.selectedDateMillis)
+                                if (formattedDate.isNotEmpty() && noteText.isNotEmpty()) {
+                                    maidViewModel.addNoteToMaid(maidId, formattedDate, noteText)
+                                }
+                            }
+                        )
+                    }
+                    // --- END NEW ---
+
                     Column(
                         modifier = Modifier
-                            .fillMaxSize(),
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()), // --- NEW: Make the column scrollable ---
                         // --- REMOVED faulty padding ---
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -1929,6 +2000,17 @@ fun AttendanceHistoryScreen(
                             modifier = Modifier.padding(top = 16.dp) // Add padding here
                             // --- We cannot customize individual cells here, so dayContent is removed ---
                         )
+
+                        // --- NEW: Add Note Button ---
+                        Button(
+                            onClick = { showAddNoteDialog = true },
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Add Note for this Date")
+                        }
+                        // --- END NEW ---
 
                         Divider(
                             modifier = Modifier.padding(horizontal = 16.dp), // Add padding here
@@ -1945,31 +2027,127 @@ fun AttendanceHistoryScreen(
                             sdf.format(cal.time)
                         }
 
-                        Text(
-                            "Records for $selectedDateFormatted",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        if (selectedDateRecords.isEmpty()) {
+                        // --- Wrap content in a Column with padding ---
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                             Text(
-                                "No attendance recorded for this day.",
-                                modifier = Modifier.padding(horizontal = 16.dp) // Add padding here
+                                "Records for $selectedDateFormatted",
+                                style = MaterialTheme.typography.titleMedium
                             )
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(horizontal = 16.dp) // Add padding here
-                            ) {
-                                items(selectedDateRecords) { record ->
-                                    AttendanceItem(record)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (selectedDateRecords.isEmpty()) {
+                                Text("No attendance recorded for this day.")
+                            } else {
+                                // --- Use Column instead of LazyColumn inside a verticalScroll ---
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    selectedDateRecords.forEach { record ->
+                                        AttendanceItem(record)
+                                    }
                                 }
                             }
+
+                            // --- NEW: Show Notes ---
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                "Notes for $selectedDateFormatted",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (selectedDateNotes.isEmpty()) {
+                                Text("No notes for this day.")
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    selectedDateNotes.forEach { note ->
+                                        NoteItem(note = note)
+                                    }
+                                }
+                            }
+                            // --- END NEW ---
+
+                            Spacer(modifier = Modifier.height(16.dp)) // Add padding at the bottom
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+// --- NEWLY ADDED COMPOSABLE ---
+@Composable
+fun AddNoteDialog(
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var noteText by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Add Note", style = MaterialTheme.typography.headlineSmall)
+
+                OutlinedTextField(
+                    value = noteText,
+                    onValueChange = { noteText = it },
+                    label = { Text("Your note...") },
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    enabled = !isLoading,
+                    maxLines = 5
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss, enabled = !isLoading) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onConfirm(noteText) },
+                        enabled = !isLoading && noteText.isNotBlank()
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Save Note")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- NEWLY ADDED COMPOSABLE ---
+@Composable
+fun NoteItem(note: Note) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                imageVector = Icons.Default.EditNote,
+                contentDescription = "Note",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 16.dp)
+            )
+            Text(
+                text = note.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

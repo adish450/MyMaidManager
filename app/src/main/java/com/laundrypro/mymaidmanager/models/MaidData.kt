@@ -10,7 +10,8 @@ data class Maid(
     val address: String,
     val user: String,
     val tasks: List<Task>,
-    val attendance: List<AttendanceRecord>
+    val attendance: List<AttendanceRecord>,
+    val notes: List<Note>
 )
 
 data class Task(
@@ -27,6 +28,13 @@ data class AttendanceRecord(
     val date: String,
     val taskName: String,
     val status: String
+)
+
+data class Note(
+    @SerializedName("_id")
+    val id: String,
+    val date: String,
+    val text: String
 )
 
 data class AddMaidRequest(
@@ -56,4 +64,9 @@ data class UpdateTaskRequest(
     val name: String,
     val price: Double,
     val frequency: String
+)
+
+data class AddNoteRequest(
+    val date: String,
+    val text: String
 )
